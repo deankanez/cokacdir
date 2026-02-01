@@ -10,7 +10,7 @@ const shortcutGroups = [
       { key: 'Esc', action: 'Parent directory' },
       { key: 'Tab / ← →', action: 'Switch panels' },
       { key: 'Home / End', action: 'First / Last item' },
-      { key: '/ / 1', action: 'Go to path / Home' },
+      { key: '/ / 1 / 2', action: 'Go to path / Home / Refresh' },
     ],
   },
   {
@@ -38,6 +38,13 @@ const shortcutGroups = [
       { key: 'e', action: 'Edit file' },
       { key: 'p', action: 'Process manager' },
       { key: '`', action: 'Settings' },
+    ],
+  },
+  {
+    title: 'macOS Only',
+    shortcuts: [
+      { key: 'o', action: 'Open folder in Finder' },
+      { key: 'c', action: 'Open folder in VS Code' },
     ],
   },
   {
