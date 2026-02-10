@@ -3083,7 +3083,7 @@ pub fn handle_input(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.previous_screen = None;
                         app.current_screen = Screen::FileViewer;
                     } else {
-                        app.current_screen = Screen::DualPanel;
+                        app.current_screen = Screen::FilePanel;
                     }
                 } else {
                     // 첫 번째 Esc: 경고 메시지
@@ -3102,7 +3102,7 @@ pub fn handle_input(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.previous_screen = None;
                     app.current_screen = Screen::FileViewer;
                 } else {
-                    app.current_screen = Screen::DualPanel;
+                    app.current_screen = Screen::FilePanel;
                 }
             }
         }

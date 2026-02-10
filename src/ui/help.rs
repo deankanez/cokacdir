@@ -14,14 +14,14 @@ use ratatui::{
 
 use super::{
     app::App,
-    draw::draw_dual_panel_background,
+    draw::draw_panel_background,
     theme::Theme,
 };
 
 /// Draw the help screen
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    // First draw the dual panel in background
-    draw_dual_panel_background(frame, app, area, theme);
+    // First draw the panels in background
+    draw_panel_background(frame, app, area, theme);
 
     // Build help content
     let lines = build_help_content(theme);
@@ -183,6 +183,8 @@ fn build_help_content(theme: &Theme) -> Vec<Line<'static>> {
     lines.push(key_line("2", "Refresh file list"));
     lines.push(key_line("/", "Go to path dialog"));
     lines.push(key_line("'", "Toggle bookmark"));
+    lines.push(key_line("0", "Add new panel"));
+    lines.push(key_line("9", "Close current panel"));
     lines.push(Line::from(""));
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -374,7 +376,11 @@ fn build_help_content(theme: &Theme) -> Vec<Line<'static>> {
         Span::styled("1", key_highlight_style),
         Span::styled("home ", desc_style),
         Span::styled("2", key_highlight_style),
-        Span::styled("ref", desc_style),
+        Span::styled("ref ", desc_style),
+        Span::styled("0", key_highlight_style),
+        Span::styled("+pan ", desc_style),
+        Span::styled("9", key_highlight_style),
+        Span::styled("-pan", desc_style),
     ]));
     #[cfg(target_os = "macos")]
     lines.push(Line::from(vec![

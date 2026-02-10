@@ -1942,12 +1942,13 @@ impl SyntaxHighlighter {
         if self.in_multiline_comment {
             let end_idx = line.find(block_comment.1);
             if let Some(idx) = end_idx {
+                let byte_end = idx + block_comment.1.len();
                 tokens.push(Token {
-                    text: line[..idx + block_comment.1.len()].to_string(),
+                    text: line[..byte_end].to_string(),
                     token_type: TokenType::Comment,
                 });
                 self.in_multiline_comment = false;
-                i = idx + block_comment.1.len();
+                i = line[..byte_end].chars().count();
             } else {
                 tokens.push(Token {
                     text: line.to_string(),

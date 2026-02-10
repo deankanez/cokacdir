@@ -22,12 +22,12 @@ export default function TerminalPreview() {
         <div className="p-4 font-mono text-sm">
           {/* Header */}
           <div className="text-center text-accent-cyan mb-2 font-bold">
-            COKACDIR v0.4.6
+            COKACDIR v0.4.22
           </div>
 
-          {/* Dual panel */}
+          {/* Multi panel */}
           <div className="flex gap-2">
-            {/* Left panel */}
+            {/* Panel 1 */}
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -46,7 +46,7 @@ export default function TerminalPreview() {
               </div>
             </motion.div>
 
-            {/* Right panel */}
+            {/* Panel 2 */}
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}

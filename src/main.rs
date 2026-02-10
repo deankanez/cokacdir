@@ -23,10 +23,13 @@ use crate::utils::markdown::{render_markdown, MarkdownTheme, is_line_empty};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_help() {
-    println!("cokacdir {} - Dual-panel terminal file manager", VERSION);
+    println!("cokacdir {} - Multi-panel terminal file manager", VERSION);
     println!();
     println!("USAGE:");
-    println!("    cokacdir [OPTIONS]");
+    println!("    cokacdir [OPTIONS] [PATH...]");
+    println!();
+    println!("ARGS:");
+    println!("    [PATH...]               Open panels at given paths (max 10)");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help              Print help information");
@@ -134,9 +137,11 @@ fn main() -> io::Result<()> {
     // Handle command line arguments
     let args: Vec<String> = env::args().collect();
     let mut design_mode = false;
+    let mut start_paths: Vec<std::path::PathBuf> = Vec::new();
 
-    if args.len() > 1 {
-        match args[1].as_str() {
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
             "-h" | "--help" => {
                 print_help();
                 return Ok(());
@@ -146,31 +151,56 @@ fn main() -> io::Result<()> {
                 return Ok(());
             }
             "--prompt" => {
-                if args.len() < 3 {
+                if i + 1 >= args.len() {
                     eprintln!("Error: --prompt requires a text argument");
                     eprintln!("Usage: cokacdir --prompt \"your question\"");
                     return Ok(());
                 }
-                handle_prompt(&args[2]);
+                handle_prompt(&args[i + 1]);
                 return Ok(());
             }
             "--base64" => {
-                if args.len() < 3 {
+                if i + 1 >= args.len() {
                     std::process::exit(1);
                 }
-                handle_base64(&args[2]);
+                handle_base64(&args[i + 1]);
                 return Ok(());
             }
             "--design" => {
                 design_mode = true;
             }
-            _ => {
-                eprintln!("Unknown option: {}", args[1]);
+            arg if arg.starts_with('-') => {
+                eprintln!("Unknown option: {}", arg);
                 eprintln!("Use --help for usage information");
                 return Ok(());
             }
+            path => {
+                // Treat as a directory path
+                let p = std::path::PathBuf::from(path);
+                let resolved = if p.is_absolute() {
+                    p
+                } else {
+                    env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")).join(p)
+                };
+                start_paths.push(resolved);
+            }
         }
+        i += 1;
     }
+
+    // Setup panic hook to restore terminal on panic
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            DisableBracketedPaste,
+            crossterm::cursor::Show
+        );
+        original_hook(panic_info);
+    }));
 
     // Setup terminal
     enable_raw_mode()?;
@@ -195,6 +225,11 @@ fn main() -> io::Result<()> {
     };
     let mut app = App::with_settings(settings);
     app.design_mode = design_mode;
+
+    // Override panels with command-line paths if provided
+    if !start_paths.is_empty() {
+        app.set_panels_from_paths(start_paths);
+    }
 
     // Show settings load error if any
     if let Some(err) = settings_error {
@@ -471,8 +506,8 @@ fn run_app<B: ratatui::backend::Backend>(
             match event::read()? {
                 Event::Key(key) => {
                     match app.current_screen {
-                        Screen::DualPanel => {
-                            if handle_dual_panel_input(app, key.code, key.modifiers) {
+                        Screen::FilePanel => {
+                            if handle_panel_input(app, key.code, key.modifiers) {
                                 return Ok(());
                             }
                         }
@@ -490,7 +525,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         }
                         Screen::Help => {
                             if ui::help::handle_input(app, key.code) {
-                                app.current_screen = Screen::DualPanel;
+                                app.current_screen = Screen::FilePanel;
                             }
                         }
                         Screen::AIScreen => {
@@ -498,7 +533,7 @@ fn run_app<B: ratatui::backend::Backend>(
                                 if ui::ai_screen::handle_input(state, key.code, key.modifiers) {
                                     // Save session to file before leaving
                                     state.save_session_to_file();
-                                    app.current_screen = Screen::DualPanel;
+                                    app.current_screen = Screen::FilePanel;
                                     app.ai_state = None;
                                     // Refresh panels in case AI modified files
                                     app.refresh_panels();
@@ -507,7 +542,7 @@ fn run_app<B: ratatui::backend::Backend>(
                         }
                         Screen::SystemInfo => {
                             if ui::system_info::handle_input(&mut app.system_info_state, key.code) {
-                                app.current_screen = Screen::DualPanel;
+                                app.current_screen = Screen::FilePanel;
                             }
                         }
                         Screen::ImageViewer => {
@@ -530,7 +565,7 @@ fn run_app<B: ratatui::backend::Backend>(
                                 } else {
                                     // Esc: 검색 결과 화면 닫기
                                     app.search_result_state.active = false;
-                                    app.current_screen = Screen::DualPanel;
+                                    app.current_screen = Screen::FilePanel;
                                 }
                             }
                         }
@@ -543,9 +578,9 @@ fn run_app<B: ratatui::backend::Backend>(
                                 ui::ai_screen::handle_paste(state, &text);
                             }
                         }
-                        Screen::DualPanel => {
+                        Screen::FilePanel => {
                             // AI mode with focus on AI panel
-                            if app.is_ai_mode() && app.ai_panel_side == Some(app.active_panel) {
+                            if app.is_ai_mode() && app.ai_panel_index == Some(app.active_panel_index) {
                                 if let Some(ref mut state) = app.ai_state {
                                     ui::ai_screen::handle_paste(state, &text);
                                 }
@@ -572,10 +607,10 @@ fn run_app<B: ratatui::backend::Backend>(
     }
 }
 
-fn handle_dual_panel_input(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> bool {
+fn handle_panel_input(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> bool {
     // AI 모드일 때: active_panel이 AI 패널 쪽이면 AI로 입력 전달, 아니면 파일 패널 조작
     if app.is_ai_mode() {
-        let ai_has_focus = app.ai_panel_side == Some(app.active_panel);
+        let ai_has_focus = app.ai_panel_index == Some(app.active_panel_index);
         if code == KeyCode::Tab {
             app.switch_panel();
             return false;
@@ -666,7 +701,8 @@ fn handle_dual_panel_input(app: &mut App, code: KeyCode, modifiers: KeyModifiers
         KeyCode::Tab => app.switch_panel(),
 
         // Left/Right - switch panels (keep same index position)
-        KeyCode::Left | KeyCode::Right => app.switch_panel_keep_index(),
+        KeyCode::Left => app.switch_panel_left(),
+        KeyCode::Right => app.switch_panel_right(),
 
         // Enter - open directory or file
         KeyCode::Enter => app.enter_selected(),
@@ -701,8 +737,10 @@ fn handle_dual_panel_input(app: &mut App, code: KeyCode, modifiers: KeyModifiers
         KeyCode::Char('t') | KeyCode::Char('T') => app.show_tar_dialog(),
         KeyCode::Char('f') => app.show_search_dialog(),
         KeyCode::Char('/') => app.show_goto_dialog(),
+        KeyCode::Char('0') => app.add_panel(),
         KeyCode::Char('1') => app.goto_home(),
         KeyCode::Char('2') => app.refresh_panels(),
+        KeyCode::Char('9') => app.close_panel(),
 
         // AI screen - '.'
         KeyCode::Char('.') => app.show_ai_screen(),

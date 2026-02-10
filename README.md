@@ -1,6 +1,6 @@
 # COKACDIR
 
-Dual-panel terminal file manager with AI-powered natural language commands.
+Multi-panel terminal file manager with AI-powered natural language commands.
 
 **Terminal File Manager for Vibe Coders** - An easy terminal explorer for vibe coders who are scared of the terminal.
 
@@ -8,7 +8,7 @@ Dual-panel terminal file manager with AI-powered natural language commands.
 
 - **Blazing Fast**: Written in Rust for maximum performance. ~10ms startup, ~5MB memory usage, ~4MB static binary with zero runtime dependencies.
 - **AI-Powered Commands**: Natural language file operations powered by Claude AI. Press `.` and describe what you want.
-- **Dual-Panel Navigation**: Classic dual-panel interface for efficient file management
+- **Multi-Panel Navigation**: Dynamic multi-panel interface for efficient file management (add/remove panels with 0/9 keys)
 - **Keyboard Driven**: Full keyboard navigation designed for power users
 - **Built-in Viewer & Editor**: View and edit files with syntax highlighting for 20+ languages
 - **Image Viewer**: View images directly in terminal with zoom and pan support
@@ -27,7 +27,13 @@ Dual-panel terminal file manager with AI-powered natural language commands.
 Then run:
 
 ```bash
-cokacdir
+cokacdir [PATH...]
+```
+
+You can open multiple panels by passing paths:
+
+```bash
+cokacdir ~/projects ~/downloads ~/documents
 ```
 
 ### From Source
@@ -201,15 +207,17 @@ Press `u` on any file to open the handler setup dialog:
 
 ```json
 {
-  "left_panel": {
-    "sort_by": "name",
-    "sort_order": "asc"
-  },
-  "right_panel": {
-    "sort_by": "name",
-    "sort_order": "asc"
-  },
-  "active_panel": "left",
+  "panels": [
+    {
+      "sort_by": "name",
+      "sort_order": "asc"
+    },
+    {
+      "sort_by": "name",
+      "sort_order": "asc"
+    }
+  ],
+  "active_panel_index": 0,
   "theme": {
     "name": "dark"
   },
@@ -247,6 +255,8 @@ Press `u` on any file to open the handler setup dialog:
 | `PgUp`/`PgDn` | Move 10 lines |
 | `/` | Go to path |
 | `'` | Toggle bookmark |
+| `0` | Add new panel |
+| `9` | Close current panel |
 | `1` | Go to home directory |
 | `2` | Refresh file list |
 

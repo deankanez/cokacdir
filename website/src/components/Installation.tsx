@@ -33,7 +33,7 @@ export default function Installation() {
           className="space-y-4"
         >
           <CodeBlock code={`/bin/bash -c "$(curl -fsSL https://cokacdir.cokac.com/install.sh)"`} />
-          <CodeBlock code="cokacdir" />
+          <CodeBlock code="cokacdir [PATH...]" />
         </motion.div>
 
         <motion.div

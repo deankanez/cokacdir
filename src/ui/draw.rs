@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use super::{
-    app::{App, PanelSide, Screen},
+    app::{App, Screen},
     dialogs,
     file_editor,
     file_info,
@@ -54,7 +54,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     match app.current_screen {
-        Screen::DualPanel => draw_dual_panel(frame, app, area, &theme),
+        Screen::FilePanel => draw_panels(frame, app, area, &theme),
         Screen::FileViewer => {
             if app.is_ai_mode() {
                 // AI 모드: 뷰어와 AI 화면을 나란히 표시
@@ -83,8 +83,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             system_info::draw(frame, &app.system_info_state, area, &theme);
         }
         Screen::ImageViewer => {
-            // 이미지 뷰어는 항상 배경(dual panel) 위에 오버레이로 표시
-            // AI 모드여도 draw_dual_panel_background가 AI 패널을 포함해서 그림
+            // 이미지 뷰어는 항상 배경(패널) 위에 오버레이로 표시
+            // AI 모드여도 draw_panel_background가 AI 패널을 포함해서 그림
             image_viewer::draw(frame, app, area, &theme);
         }
         Screen::SearchResult => {
@@ -93,7 +93,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     // Draw advanced search dialog overlay if active
-    if app.advanced_search_state.active && app.current_screen == Screen::DualPanel {
+    if app.advanced_search_state.active && app.current_screen == Screen::FilePanel {
         advanced_search::draw(frame, &app.advanced_search_state, area, &theme);
     }
 
@@ -111,7 +111,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_dual_panel(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
+fn draw_panels(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     // Layout: Panels, Status Bar, Function Bar (no header - saves 1 line)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -122,59 +122,42 @@ fn draw_dual_panel(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) 
         ])
         .split(area);
 
-    // Dual panels
+    // Dynamic N-panel layout
+    let num_panels = app.panels.len();
+    let constraints: Vec<Constraint> = (0..num_panels)
+        .map(|_| Constraint::Ratio(1, num_panels as u32))
+        .collect();
     let panel_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints(constraints)
         .split(chunks[0]);
 
-    let left_path_str = app.left_panel.path.display().to_string();
-    let right_path_str = app.right_panel.path.display().to_string();
-    let left_bookmarked = app.settings.bookmarked_path.contains(&left_path_str);
-    let right_bookmarked = app.settings.bookmarked_path.contains(&right_path_str);
-
-    // AI 모드일 때 해당 패널에 AI 화면 표시
-    let ai_on_left = app.ai_panel_side == Some(PanelSide::Left);
-    let ai_on_right = app.ai_panel_side == Some(PanelSide::Right);
     let is_ai_mode = app.is_ai_mode();
     let has_dialog = app.dialog.is_some();
-    let active_panel = app.active_panel;
+    let active_idx = app.active_panel_index;
+    let ai_panel_index = app.ai_panel_index;
 
-    // 왼쪽 패널: AI 또는 파일 목록
-    if ai_on_left {
-        if let Some(ref mut state) = app.ai_state {
-            let ai_focused = active_panel == PanelSide::Left && !has_dialog;
-            ai_screen::draw_with_focus(frame, state, panel_chunks[0], theme, ai_focused);
+    // 각 패널을 루프로 렌더링
+    for i in 0..num_panels {
+        if ai_panel_index == Some(i) {
+            // AI 화면 렌더링
+            if let Some(ref mut state) = app.ai_state {
+                let ai_focused = active_idx == i && !has_dialog;
+                ai_screen::draw_with_focus(frame, state, panel_chunks[i], theme, ai_focused);
+            }
+        } else {
+            let path_str = app.panels[i].path.display().to_string();
+            let bookmarked = app.settings.bookmarked_path.contains(&path_str);
+            let focused = active_idx == i && !has_dialog && (!is_ai_mode || ai_panel_index != Some(i));
+            panel::draw(
+                frame,
+                &mut app.panels[i],
+                panel_chunks[i],
+                focused,
+                bookmarked,
+                theme,
+            );
         }
-    } else {
-        // AI 모드에서 파일 패널에 포커스: active_panel이 이쪽이고 AI가 반대쪽에 있을 때
-        let left_focused = active_panel == PanelSide::Left && !has_dialog && (!is_ai_mode || ai_on_right);
-        panel::draw(
-            frame,
-            &mut app.left_panel,
-            panel_chunks[0],
-            left_focused,
-            left_bookmarked,
-            theme,
-        );
-    }
-
-    // 오른쪽 패널: AI 또는 파일 목록
-    if ai_on_right {
-        if let Some(ref mut state) = app.ai_state {
-            let ai_focused = active_panel == PanelSide::Right && !has_dialog;
-            ai_screen::draw_with_focus(frame, state, panel_chunks[1], theme, ai_focused);
-        }
-    } else {
-        let right_focused = active_panel == PanelSide::Right && !has_dialog && (!is_ai_mode || ai_on_left);
-        panel::draw(
-            frame,
-            &mut app.right_panel,
-            panel_chunks[1],
-            right_focused,
-            right_bookmarked,
-            theme,
-        );
     }
 
     // Status bar
@@ -182,13 +165,11 @@ fn draw_dual_panel(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) 
 
     // Function bar or message
     draw_function_bar(frame, app, chunks[2], theme);
-
-    // Dialog overlay는 draw() 함수 끝에서 모든 화면 위에 그려짐
 }
 
-/// Public function for drawing dual panel background (used by overlay screens)
-pub fn draw_dual_panel_background(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    draw_dual_panel(frame, app, area, theme);
+/// Public function for drawing panel background (used by overlay screens)
+pub fn draw_panel_background(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
+    draw_panels(frame, app, area, theme);
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
@@ -275,6 +256,8 @@ fn draw_function_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         ("1", "hom "),
         ("2", "ref "),
         ("'", "mrk "),
+        ("0", "+pan "),
+        ("9", "-pan "),
     ];
 
     // macOS only: open in Finder, open in VS Code
@@ -306,7 +289,7 @@ fn draw_function_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 
 /// AI 모드에서 에디터와 AI 화면을 나란히 표시
 fn draw_editor_with_ai(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    // Layout: Panels, Status Bar, Function Bar (same as draw_dual_panel)
+    // Layout: Panels, Status Bar, Function Bar (same as draw_panels)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -321,7 +304,7 @@ fn draw_editor_with_ai(frame: &mut Frame, app: &mut App, area: Rect, theme: &The
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[0]);
 
-    let ai_on_left = app.ai_panel_side == Some(PanelSide::Left);
+    let ai_on_left = app.ai_panel_index.map(|i| i < app.active_panel_index).unwrap_or(false);
 
     if ai_on_left {
         // AI 왼쪽, 에디터 오른쪽
@@ -348,7 +331,7 @@ fn draw_editor_with_ai(frame: &mut Frame, app: &mut App, area: Rect, theme: &The
 
 /// AI 모드에서 뷰어와 AI 화면을 나란히 표시
 fn draw_viewer_with_ai(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    // Layout: Panels, Status Bar, Function Bar (same as draw_dual_panel)
+    // Layout: Panels, Status Bar, Function Bar (same as draw_panels)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -363,7 +346,7 @@ fn draw_viewer_with_ai(frame: &mut Frame, app: &mut App, area: Rect, theme: &The
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[0]);
 
-    let ai_on_left = app.ai_panel_side == Some(PanelSide::Left);
+    let ai_on_left = app.ai_panel_index.map(|i| i < app.active_panel_index).unwrap_or(false);
 
     if ai_on_left {
         // AI 왼쪽, 뷰어 오른쪽

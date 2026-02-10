@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::services::file_ops::FileOperationType;
+use crate::utils::format::{safe_suffix, safe_prefix};
 
 use super::{
     app::{App, ConflictResolution, ConflictState, Dialog, DialogType, PathCompletion, SettingsState, fuzzy_match},
@@ -205,22 +206,22 @@ fn find_common_prefix(suggestions: &[String]) -> String {
     }
 
     let first = &suggestions[0];
-    let mut common_len = first.len();
+    let mut common_chars = first.chars().count();
 
     for s in suggestions.iter().skip(1) {
         let mut len = 0;
         for (c1, c2) in first.chars().zip(s.chars()) {
             if c1.to_lowercase().eq(c2.to_lowercase()) {
-                len += c1.len_utf8();
+                len += 1;
             } else {
                 break;
             }
         }
-        common_len = common_len.min(len);
+        common_chars = common_chars.min(len);
     }
 
     // 디렉토리 접미사 `/` 제외
-    let common: String = first.chars().take(common_len).collect();
+    let common: String = first.chars().take(common_chars).collect();
     common.trim_end_matches('/').to_string()
 }
 
@@ -1041,7 +1042,8 @@ fn draw_copy_move_dialog(frame: &mut Frame, dialog: &Dialog, area: Rect, theme: 
             if let Some(selected) = completion.suggestions.get(completion.selected_index) {
                 let selected_name = selected.trim_end_matches('/');
                 if selected_name.to_lowercase().starts_with(&current_prefix.to_lowercase()) {
-                    let suffix = &selected_name[current_prefix.len()..];
+                    let prefix_char_count = current_prefix.chars().count();
+                    let suffix: String = selected_name.chars().skip(prefix_char_count).collect();
                     if selected.ends_with('/') {
                         format!("{}/", suffix)
                     } else {
@@ -1259,7 +1261,8 @@ fn draw_goto_dialog(frame: &mut Frame, app: &App, dialog: &Dialog, area: Rect, t
                 let selected_name = selected.trim_end_matches('/');
                 // 대소문자 무시하여 prefix 매칭 후 나머지 부분 추출
                 if selected_name.to_lowercase().starts_with(&current_prefix.to_lowercase()) {
-                    let suffix = &selected_name[current_prefix.len()..];
+                    let prefix_char_count = current_prefix.chars().count();
+                    let suffix: String = selected_name.chars().skip(prefix_char_count).collect();
                     if selected.ends_with('/') {
                         format!("{}/", suffix)
                     } else {
@@ -1545,7 +1548,7 @@ fn draw_progress_dialog(frame: &mut Frame, app: &App, area: Rect, theme: &Theme)
     // Current file name (truncated if needed)
     let max_filename_len = (inner.width - 8) as usize;
     let current_file = if progress.current_file.len() > max_filename_len {
-        format!("...{}", &progress.current_file[progress.current_file.len().saturating_sub(max_filename_len - 3)..])
+        format!("...{}", safe_suffix(&progress.current_file, max_filename_len.saturating_sub(3)))
     } else {
         progress.current_file.clone()
     };
@@ -1649,7 +1652,7 @@ fn draw_duplicate_conflict_dialog(
     // Line 2: filename (quoted, truncated if needed)
     let max_name_len = (inner.width - 6) as usize;
     let truncated_name = if display_name.len() > max_name_len {
-        format!("\"{}...\"", &display_name[..max_name_len.saturating_sub(4)])
+        format!("\"{}...\"", safe_prefix(&display_name, max_name_len.saturating_sub(4)))
     } else {
         format!("\"{}\"", display_name)
     };
@@ -1766,8 +1769,9 @@ fn draw_tar_exclude_confirm_dialog(
 
     for (i, path) in visible_paths.iter().enumerate() {
         let y = inner.y + 2 + i as u16;
-        let display_path = if path.len() > (inner.width - 6) as usize {
-            format!("  ...{}", &path[path.len().saturating_sub((inner.width - 9) as usize)..])
+        let max_path_len = (inner.width - 6) as usize;
+        let display_path = if path.len() > max_path_len {
+            format!("  ...{}", safe_suffix(path, (inner.width - 9) as usize))
         } else {
             format!("  {}", path)
         };
@@ -1869,8 +1873,9 @@ fn draw_copy_exclude_confirm_dialog(
 
     for (i, path) in visible_paths.iter().enumerate() {
         let y = inner.y + 2 + i as u16;
-        let display_path = if path.len() > (inner.width - 6) as usize {
-            format!("  ...{}", &path[path.len().saturating_sub((inner.width - 9) as usize)..])
+        let max_path_len = (inner.width - 6) as usize;
+        let display_path = if path.len() > max_path_len {
+            format!("  ...{}", safe_suffix(path, (inner.width - 9) as usize))
         } else {
             format!("  {}", path)
         };

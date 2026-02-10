@@ -924,6 +924,38 @@ fn highlight_search_in_line(
     spans
 }
 
+/// 원본 문자열에서 대소문자 무시 검색하여 (byte_start, byte_end) 쌍 반환
+fn case_insensitive_find_all(line: &str, term: &str) -> Vec<(usize, usize)> {
+    let term_lower: Vec<char> = term.to_lowercase().chars().collect();
+    if term_lower.is_empty() {
+        return Vec::new();
+    }
+    let mut results = Vec::new();
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    for start_idx in 0..chars.len() {
+        let mut matched = true;
+        let mut ti = 0;
+        let mut ci = start_idx;
+        while ti < term_lower.len() {
+            if ci >= chars.len() { matched = false; break; }
+            let lc: Vec<char> = chars[ci].1.to_lowercase().collect();
+            if lc.len() == 1 && lc[0] == term_lower[ti] {
+                ci += 1;
+                ti += 1;
+            } else {
+                matched = false;
+                break;
+            }
+        }
+        if matched && ti == term_lower.len() {
+            let byte_start = chars[start_idx].0;
+            let byte_end = if ci < chars.len() { chars[ci].0 } else { line.len() };
+            results.push((byte_start, byte_end));
+        }
+    }
+    results
+}
+
 /// Wrapped 텍스트에서 검색어 하이라이트
 fn highlight_search_in_wrapped_line(
     line: &str,
@@ -935,8 +967,7 @@ fn highlight_search_in_wrapped_line(
         return vec![Span::styled(line.to_string(), base_style)];
     }
 
-    let lower_line = line.to_lowercase();
-    let lower_term = search_term.to_lowercase();
+    let matches = case_insensitive_find_all(line, search_term);
 
     let mut spans = Vec::new();
     let mut last_end = 0;
@@ -946,20 +977,21 @@ fn highlight_search_in_wrapped_line(
         .bg(theme.viewer.search_match_other_bg)
         .fg(theme.viewer.search_match_other_fg);
 
-    for (byte_start, matched) in lower_line.match_indices(&lower_term) {
-        let byte_end = byte_start + matched.len();
-
-        if byte_start > last_end {
+    for (byte_start, byte_end) in &matches {
+        if *byte_start < last_end {
+            continue; // 겹침 매치 건너뛰기
+        }
+        if *byte_start > last_end {
             spans.push(Span::styled(
-                line[last_end..byte_start].to_string(),
+                line[last_end..*byte_start].to_string(),
                 base_style,
             ));
         }
         spans.push(Span::styled(
-            line[byte_start..byte_end].to_string(),
+            line[*byte_start..*byte_end].to_string(),
             match_style,
         ));
-        last_end = byte_end;
+        last_end = *byte_end;
     }
 
     if last_end < line.len() {
@@ -1322,10 +1354,10 @@ pub fn handle_input(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     match code {
         // ^Q: quit (Esc도 유지)
         KeyCode::Esc => {
-            app.current_screen = Screen::DualPanel;
+            app.current_screen = Screen::FilePanel;
         }
         KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.current_screen = Screen::DualPanel;
+            app.current_screen = Screen::FilePanel;
         }
         KeyCode::Char('e') | KeyCode::Char('E') => {
             // 편집기 모드로 전환

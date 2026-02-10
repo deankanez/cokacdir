@@ -6,8 +6,13 @@ use std::fs::OpenOptions;
 use regex::Regex;
 use serde_json::Value;
 
-/// Debug logging helper (ENABLED for investigation)
+/// Debug logging helper (only active when COKACDIR_DEBUG=1)
 fn debug_log(msg: &str) {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    let enabled = ENABLED.get_or_init(|| {
+        std::env::var("COKACDIR_DEBUG").map(|v| v == "1").unwrap_or(false)
+    });
+    if !*enabled { return; }
     if let Some(home) = dirs::home_dir() {
         let debug_dir = home.join(".cokacdir").join("debug");
         let _ = std::fs::create_dir_all(&debug_dir);

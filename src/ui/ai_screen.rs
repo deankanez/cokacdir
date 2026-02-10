@@ -15,8 +15,16 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
-/// Debug logging helper (ENABLED for investigation)
+use std::sync::OnceLock;
+use crate::utils::format::safe_truncate;
+
+/// Debug logging helper (only active when COKACDIR_DEBUG=1)
 fn debug_log(msg: &str) {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    let enabled = ENABLED.get_or_init(|| {
+        std::env::var("COKACDIR_DEBUG").map(|v| v == "1").unwrap_or(false)
+    });
+    if !*enabled { return; }
     if let Some(home) = dirs::home_dir() {
         let debug_dir = home.join(".cokacdir").join("debug");
         let _ = std::fs::create_dir_all(&debug_dir);
@@ -78,7 +86,7 @@ fn sanitize_user_input(input: &str) -> String {
     // Limit input length to prevent token exhaustion
     const MAX_INPUT_LENGTH: usize = 4000;
     if sanitized.len() > MAX_INPUT_LENGTH {
-        sanitized.truncate(MAX_INPUT_LENGTH);
+        safe_truncate(&mut sanitized, MAX_INPUT_LENGTH);
         sanitized.push_str("... [truncated]");
     }
 
@@ -854,7 +862,7 @@ impl AIScreenState {
 
         // Prepare context for async execution with clear boundaries
         let context_prompt = format!(
-            "You are an AI assistant helping with file management in a dual-panel terminal file manager.
+            "You are an AI assistant helping with file management in a multi-panel terminal file manager.
 Current working directory: {}
 
 ---BEGIN USER REQUEST---

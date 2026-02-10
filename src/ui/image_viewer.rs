@@ -299,8 +299,8 @@ fn get_spinner_frame() -> char {
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    // Draw dual panel in background (항상 그림 - AI 모드 포함)
-    super::draw::draw_dual_panel_background(frame, app, area, theme);
+    // Draw panels in background (항상 그림 - AI 모드 포함)
+    super::draw::draw_panel_background(frame, app, area, theme);
 
     let state = match &app.image_viewer_state {
         Some(s) => s,
@@ -309,7 +309,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
 
     // AI 모드에서는 파일 패널 영역에만 이미지 오버레이 표시
     let overlay_area = if app.is_ai_mode() {
-        // 패널 영역 계산 (draw.rs의 draw_dual_panel과 동일한 레이아웃)
+        // 패널 영역 계산 (draw.rs의 draw_panels와 동일한 동적 레이아웃)
         let chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
@@ -318,16 +318,16 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
                 ratatui::layout::Constraint::Length(1),
             ])
             .split(area);
+        let num_panels = app.panels.len();
+        let constraints: Vec<ratatui::layout::Constraint> = (0..num_panels)
+            .map(|_| ratatui::layout::Constraint::Ratio(1, num_panels as u32))
+            .collect();
         let panel_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
-            .constraints([ratatui::layout::Constraint::Percentage(50), ratatui::layout::Constraint::Percentage(50)])
+            .constraints(constraints)
             .split(chunks[0]);
-        // AI가 있는 반대쪽이 파일 패널
-        match app.ai_panel_side {
-            Some(crate::ui::app::PanelSide::Left) => panel_chunks[1],
-            Some(crate::ui::app::PanelSide::Right) => panel_chunks[0],
-            None => area,
-        }
+        // active_panel_index에 해당하는 패널 영역 사용
+        panel_chunks[app.active_panel_index.min(panel_chunks.len().saturating_sub(1))]
     } else {
         area
     };
@@ -519,7 +519,7 @@ pub fn handle_input(app: &mut App, code: KeyCode) {
     let state = match &mut app.image_viewer_state {
         Some(s) => s,
         None => {
-            app.current_screen = Screen::DualPanel;
+            app.current_screen = Screen::FilePanel;
             return;
         }
     };
@@ -536,7 +536,7 @@ pub fn handle_input(app: &mut App, code: KeyCode) {
                 app.active_panel_mut().load_files();
             }
 
-            app.current_screen = Screen::DualPanel;
+            app.current_screen = Screen::FilePanel;
             app.image_viewer_state = None;
         }
         KeyCode::Char('+') | KeyCode::Char('=') => {

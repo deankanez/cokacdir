@@ -16,8 +16,8 @@ const features: { icon: typeof Zap; title: string; description: string; highligh
   },
   {
     icon: Columns,
-    title: 'Dual Panel',
-    description: 'Classic two-panel layout for efficient file navigation. Bookmark directories for quick access with fuzzy search.',
+    title: 'Multi Panel',
+    description: 'Dynamic multi-panel layout for efficient file navigation. Add/remove panels with 0/9 keys. Bookmark directories for quick access with fuzzy search.',
   },
   {
     icon: Keyboard,

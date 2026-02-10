@@ -135,12 +135,6 @@ pub fn get_valid_path(target_path: &Path, fallback: &Path) -> PathBuf {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelSide {
-    Left,
-    Right,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortBy {
     Name,
     Type,
@@ -157,7 +151,7 @@ pub enum SortOrder {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
 pub enum Screen {
-    DualPanel,
+    FilePanel,
     FileViewer,
     FileEditor,
     FileInfo,
@@ -754,9 +748,8 @@ impl PanelState {
 }
 
 pub struct App {
-    pub left_panel: PanelState,
-    pub right_panel: PanelState,
-    pub active_panel: PanelSide,
+    pub panels: Vec<PanelState>,
+    pub active_panel_index: usize,
     pub current_screen: Screen,
     pub dialog: Option<Dialog>,
     pub message: Option<String>,
@@ -827,8 +820,8 @@ pub struct App {
 
     // AI screen state
     pub ai_state: Option<crate::ui::ai_screen::AIScreenState>,
-    pub ai_panel_side: Option<PanelSide>,  // AI가 표시될 패널 측면
-    pub ai_previous_panel: Option<PanelSide>,  // AI 화면 띄우기 전 포커스 위치
+    pub ai_panel_index: Option<usize>,  // AI가 표시될 패널 인덱스
+    pub ai_previous_panel: Option<usize>,  // AI 화면 띄우기 전 포커스 인덱스
 
     // System info state
     pub system_info_state: crate::ui::system_info::SystemInfoState,
@@ -883,12 +876,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(left_path: PathBuf, right_path: PathBuf) -> Self {
+    pub fn new(first_path: PathBuf, second_path: PathBuf) -> Self {
         Self {
-            left_panel: PanelState::new(left_path),
-            right_panel: PanelState::new(right_path),
-            active_panel: PanelSide::Left,
-            current_screen: Screen::DualPanel,
+            panels: vec![PanelState::new(first_path), PanelState::new(second_path)],
+            active_panel_index: 0,
+            current_screen: Screen::FilePanel,
             dialog: None,
             message: None,
             message_timer: 0,
@@ -929,7 +921,7 @@ impl App {
             process_force_kill: false,
 
             ai_state: None,
-            ai_panel_side: None,
+            ai_panel_index: None,
             ai_previous_panel: None,
             system_info_state: crate::ui::system_info::SystemInfoState::default(),
             advanced_search_state: crate::ui::advanced_search::AdvancedSearchState::default(),
@@ -953,24 +945,30 @@ impl App {
 
     /// Create App with settings loaded from config file
     pub fn with_settings(settings: Settings) -> Self {
-        let left_path = settings.left_start_path();
-        let right_path = settings.right_start_path();
-
-        let active_panel = if settings.active_panel.to_lowercase() == "right" {
-            PanelSide::Right
+        // Build panels from settings
+        let panels: Vec<PanelState> = if settings.panels.is_empty() {
+            // No panels configured, create defaults
+            let first = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+            let second = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+            vec![PanelState::new(first), PanelState::new(second)]
         } else {
-            PanelSide::Left
+            settings.panels.iter().map(|ps| {
+                let path = settings.resolve_path(&ps.start_path, || {
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+                });
+                PanelState::with_settings(path, ps)
+            }).collect()
         };
+        let active_panel_index = settings.active_panel_index.min(panels.len().saturating_sub(1));
 
         // Load theme from settings
         let theme = crate::ui::theme::Theme::load(&settings.theme.name);
         let theme_watch_state = ThemeWatchState::watch_theme(&settings.theme.name);
 
         Self {
-            left_panel: PanelState::with_settings(left_path, &settings.left_panel),
-            right_panel: PanelState::with_settings(right_path, &settings.right_panel),
-            active_panel,
-            current_screen: Screen::DualPanel,
+            panels,
+            active_panel_index,
+            current_screen: Screen::FilePanel,
             dialog: None,
             message: None,
             message_timer: 0,
@@ -1011,7 +1009,7 @@ impl App {
             process_force_kill: false,
 
             ai_state: None,
-            ai_panel_side: None,
+            ai_panel_index: None,
             ai_previous_panel: None,
             system_info_state: crate::ui::system_info::SystemInfoState::default(),
             advanced_search_state: crate::ui::advanced_search::AdvancedSearchState::default(),
@@ -1043,23 +1041,15 @@ impl App {
             self.settings.extension_handler = current_file_settings.extension_handler;
         }
 
-        // Update settings from current state
-        self.settings.left_panel = PanelSettings {
-            start_path: Some(self.left_panel.path.display().to_string()),
-            sort_by: sort_by_to_string(self.left_panel.sort_by),
-            sort_order: sort_order_to_string(self.left_panel.sort_order),
-        };
-
-        self.settings.right_panel = PanelSettings {
-            start_path: Some(self.right_panel.path.display().to_string()),
-            sort_by: sort_by_to_string(self.right_panel.sort_by),
-            sort_order: sort_order_to_string(self.right_panel.sort_order),
-        };
-
-        self.settings.active_panel = match self.active_panel {
-            PanelSide::Left => "left".to_string(),
-            PanelSide::Right => "right".to_string(),
-        };
+        // Update settings from current state - save panels array
+        self.settings.panels = self.panels.iter().map(|p| {
+            PanelSettings {
+                start_path: Some(p.path.display().to_string()),
+                sort_by: sort_by_to_string(p.sort_by),
+                sort_order: sort_order_to_string(p.sort_order),
+            }
+        }).collect();
+        self.settings.active_panel_index = self.active_panel_index;
 
         // Save to file (ignore errors silently)
         let _ = self.settings.save();
@@ -1083,25 +1073,18 @@ impl App {
             self.theme_watch_state.update_theme(&new_settings.theme.name);
         }
 
-        // Apply panel sort settings (keep current paths and selection)
-        let left_sort_by = parse_sort_by(&new_settings.left_panel.sort_by);
-        let left_sort_order = parse_sort_order(&new_settings.left_panel.sort_order);
-        if self.left_panel.sort_by != left_sort_by || self.left_panel.sort_order != left_sort_order {
-            self.left_panel.sort_by = left_sort_by;
-            self.left_panel.sort_order = left_sort_order;
-            self.left_panel.load_files();
+        // Apply panel sort settings from new settings (keep current paths and selection)
+        for (i, panel) in self.panels.iter_mut().enumerate() {
+            if let Some(ps) = new_settings.panels.get(i) {
+                let new_sort_by = parse_sort_by(&ps.sort_by);
+                let new_sort_order = parse_sort_order(&ps.sort_order);
+                if panel.sort_by != new_sort_by || panel.sort_order != new_sort_order {
+                    panel.sort_by = new_sort_by;
+                    panel.sort_order = new_sort_order;
+                    panel.load_files();
+                }
+            }
         }
-
-        let right_sort_by = parse_sort_by(&new_settings.right_panel.sort_by);
-        let right_sort_order = parse_sort_order(&new_settings.right_panel.sort_order);
-        if self.right_panel.sort_by != right_sort_by || self.right_panel.sort_order != right_sort_order {
-            self.right_panel.sort_by = right_sort_by;
-            self.right_panel.sort_order = right_sort_order;
-            self.right_panel.load_files();
-        }
-
-        // Update active panel setting
-        self.settings.active_panel = new_settings.active_panel;
 
         // Update tar_path setting
         self.settings.tar_path = new_settings.tar_path;
@@ -1111,8 +1094,7 @@ impl App {
 
         // Update settings
         self.settings.theme = new_settings.theme;
-        self.settings.left_panel = new_settings.left_panel;
-        self.settings.right_panel = new_settings.right_panel;
+        self.settings.panels = new_settings.panels;
 
         self.show_message("Settings reloaded");
         true
@@ -1176,54 +1158,51 @@ impl App {
     }
 
     pub fn active_panel_mut(&mut self) -> &mut PanelState {
-        match self.active_panel {
-            PanelSide::Left => &mut self.left_panel,
-            PanelSide::Right => &mut self.right_panel,
-        }
+        &mut self.panels[self.active_panel_index]
     }
 
     pub fn active_panel(&self) -> &PanelState {
-        match self.active_panel {
-            PanelSide::Left => &self.left_panel,
-            PanelSide::Right => &self.right_panel,
-        }
+        &self.panels[self.active_panel_index]
     }
 
     pub fn target_panel(&self) -> &PanelState {
-        match self.active_panel {
-            PanelSide::Left => &self.right_panel,
-            PanelSide::Right => &self.left_panel,
-        }
+        let target_idx = (self.active_panel_index + 1) % self.panels.len();
+        &self.panels[target_idx]
     }
 
     pub fn switch_panel(&mut self) {
         // 현재 패널의 선택 해제
-        self.active_panel_mut().selected_files.clear();
+        self.panels[self.active_panel_index].selected_files.clear();
+        self.active_panel_index = (self.active_panel_index + 1) % self.panels.len();
+    }
 
-        self.active_panel = match self.active_panel {
-            PanelSide::Left => PanelSide::Right,
-            PanelSide::Right => PanelSide::Left,
-        };
+    /// 왼쪽 패널로 전환 (화면 위치 유지)
+    pub fn switch_panel_left(&mut self) {
+        if self.active_panel_index == 0 { return; }
+        self.switch_panel_keep_index_to(self.active_panel_index - 1);
+    }
+
+    /// 오른쪽 패널로 전환 (화면 위치 유지)
+    pub fn switch_panel_right(&mut self) {
+        if self.active_panel_index >= self.panels.len() - 1 { return; }
+        self.switch_panel_keep_index_to(self.active_panel_index + 1);
     }
 
     /// 패널 전환 시 화면에서의 상대적 위치(줄 번호) 유지, 새 패널의 스크롤은 변경하지 않음
-    pub fn switch_panel_keep_index(&mut self) {
+    fn switch_panel_keep_index_to(&mut self, target_idx: usize) {
         // 현재 패널의 스크롤 오프셋과 선택 인덱스로 화면 내 상대 위치 계산
-        let current_scroll = self.active_panel().scroll_offset;
-        let current_index = self.active_panel().selected_index;
+        let current_scroll = self.panels[self.active_panel_index].scroll_offset;
+        let current_index = self.panels[self.active_panel_index].selected_index;
         let relative_pos = current_index.saturating_sub(current_scroll);
 
         // 현재 패널의 선택 해제
-        self.active_panel_mut().selected_files.clear();
+        self.panels[self.active_panel_index].selected_files.clear();
 
         // 패널 전환
-        self.active_panel = match self.active_panel {
-            PanelSide::Left => PanelSide::Right,
-            PanelSide::Right => PanelSide::Left,
-        };
+        self.active_panel_index = target_idx;
 
         // 새 패널의 기존 스크롤 오프셋 유지, 같은 화면 위치에 커서 설정
-        let new_panel = self.active_panel_mut();
+        let new_panel = &mut self.panels[self.active_panel_index];
         if !new_panel.files.is_empty() {
             let new_scroll = new_panel.scroll_offset;
             let new_total = new_panel.files.len();
@@ -1231,6 +1210,65 @@ impl App {
             // 새 패널의 스크롤 오프셋 + 화면 내 상대 위치 = 새 선택 인덱스
             let new_index = new_scroll + relative_pos;
             new_panel.selected_index = new_index.min(new_total.saturating_sub(1));
+        }
+    }
+
+    /// 새 패널 추가
+    /// Replace all panels with ones created from the given paths (CLI args)
+    pub fn set_panels_from_paths(&mut self, paths: Vec<PathBuf>) {
+        let paths: Vec<PathBuf> = paths.into_iter().take(10).collect();
+        let panels: Vec<PanelState> = paths.into_iter()
+            .map(|p| PanelState::new(p))
+            .collect();
+        if !panels.is_empty() {
+            self.panels = panels;
+            self.active_panel_index = 0;
+        }
+    }
+
+    pub fn add_panel(&mut self) {
+        if self.panels.len() >= 10 { return; }
+        let path = self.active_panel().path.clone();
+        let new_panel = PanelState::new(path);
+        self.panels.insert(self.active_panel_index + 1, new_panel);
+        // AI 인덱스 보정: 삽입 위치보다 뒤에 있으면 +1
+        if let Some(ai_idx) = self.ai_panel_index {
+            if ai_idx > self.active_panel_index {
+                self.ai_panel_index = Some(ai_idx + 1);
+            }
+        }
+        if let Some(prev_idx) = self.ai_previous_panel {
+            if prev_idx > self.active_panel_index {
+                self.ai_previous_panel = Some(prev_idx + 1);
+            }
+        }
+        self.active_panel_index += 1;
+    }
+
+    /// 현재 패널 닫기
+    pub fn close_panel(&mut self) {
+        if self.panels.len() <= 1 { return; }
+        let removed_idx = self.active_panel_index;
+        // AI가 이 패널에 있으면 AI 상태만 직접 정리 (close_ai_screen은 active_panel_index를 변경하므로 사용하지 않음)
+        if self.ai_panel_index == Some(removed_idx) {
+            if let Some(ref mut state) = self.ai_state {
+                state.save_session_to_file();
+            }
+            self.ai_panel_index = None;
+            self.ai_previous_panel = None;
+            self.ai_state = None;
+        }
+        self.panels.remove(removed_idx);
+        // AI 인덱스 보정
+        if let Some(ai_idx) = self.ai_panel_index {
+            if ai_idx > removed_idx { self.ai_panel_index = Some(ai_idx - 1); }
+        }
+        if let Some(prev_idx) = self.ai_previous_panel {
+            if prev_idx > removed_idx { self.ai_previous_panel = Some(prev_idx - 1); }
+            else if prev_idx == removed_idx { self.ai_previous_panel = None; }
+        }
+        if self.active_panel_index >= self.panels.len() {
+            self.active_panel_index = self.panels.len() - 1;
         }
     }
 
@@ -1900,10 +1938,10 @@ impl App {
     }
 
     pub fn refresh_panels(&mut self) {
-        self.left_panel.selected_files.clear();
-        self.right_panel.selected_files.clear();
-        self.left_panel.load_files();
-        self.right_panel.load_files();
+        for panel in &mut self.panels {
+            panel.selected_files.clear();
+            panel.load_files();
+        }
     }
 
     pub fn get_operation_files(&self) -> Vec<String> {
@@ -2302,6 +2340,11 @@ impl App {
     }
 
     pub fn show_ai_screen(&mut self) {
+        // 1패널이면 AI용 패널 자동 추가
+        if self.panels.len() == 1 {
+            let path = self.active_panel().path.clone();
+            self.panels.push(PanelState::new(path));
+        }
         let current_path = self.active_panel().path.display().to_string();
         // Try to load the most recent session, fall back to new session
         // Note: claude availability is checked inside AIScreenState (displays error in UI if unavailable)
@@ -2310,15 +2353,12 @@ impl App {
                 .unwrap_or_else(|| crate::ui::ai_screen::AIScreenState::new(current_path))
         );
         // 원래 포커스 위치 저장
-        self.ai_previous_panel = Some(self.active_panel);
-        // AI 화면을 비활성 패널(포커스가 없는 쪽)에 표시
-        let ai_side = match self.active_panel {
-            PanelSide::Left => PanelSide::Right,
-            PanelSide::Right => PanelSide::Left,
-        };
-        self.ai_panel_side = Some(ai_side);
+        self.ai_previous_panel = Some(self.active_panel_index);
+        // AI 화면을 비활성 패널(다음 패널)에 표시
+        let ai_idx = (self.active_panel_index + 1) % self.panels.len();
+        self.ai_panel_index = Some(ai_idx);
         // 포커스를 AI 화면으로 이동
-        self.active_panel = ai_side;
+        self.active_panel_index = ai_idx;
     }
 
     /// AI 화면을 닫고 상태 초기화
@@ -2328,9 +2368,11 @@ impl App {
         }
         // 원래 포커스 위치로 복원
         if let Some(prev) = self.ai_previous_panel {
-            self.active_panel = prev;
+            if prev < self.panels.len() {
+                self.active_panel_index = prev;
+            }
         }
-        self.ai_panel_side = None;
+        self.ai_panel_index = None;
         self.ai_previous_panel = None;
         self.ai_state = None;
         self.refresh_panels();
@@ -2338,7 +2380,7 @@ impl App {
 
     /// AI 모드가 활성화되어 있는지 확인
     pub fn is_ai_mode(&self) -> bool {
-        self.ai_panel_side.is_some() && self.ai_state.is_some()
+        self.ai_panel_index.is_some() && self.ai_state.is_some()
     }
 
     pub fn show_system_info(&mut self) {
@@ -2669,7 +2711,7 @@ impl App {
                     Ok(_) => {
                         self.show_message("Deleted image");
                         // 이미지 뷰어 닫기
-                        self.current_screen = Screen::DualPanel;
+                        self.current_screen = Screen::FilePanel;
                         self.image_viewer_state = None;
                     }
                     Err(e) => {
@@ -3372,7 +3414,10 @@ impl App {
             }
 
             match file_ops::rename_file(&old_path, &new_path) {
-                Ok(_) => self.show_message(&format!("Renamed to: {}", new_name)),
+                Ok(_) => {
+                    self.active_panel_mut().pending_focus = Some(new_name.to_string());
+                    self.show_message(&format!("Renamed to: {}", new_name));
+                }
                 Err(e) => self.show_message(&format!("Error: {}", e)),
             }
             self.refresh_panels();
@@ -4214,7 +4259,7 @@ impl App {
             }
             // 검색 결과 화면 닫기
             self.search_result_state.active = false;
-            self.current_screen = Screen::DualPanel;
+            self.current_screen = Screen::FilePanel;
             self.show_message(&format!("Moved to: {}", item.relative_path));
         }
     }
@@ -4371,18 +4416,18 @@ mod tests {
     #[test]
     fn test_app_initialization() {
         let temp_dir = create_temp_dir();
-        let left_path = temp_dir.join("left");
-        let right_path = temp_dir.join("right");
+        let first_path = temp_dir.join("first");
+        let second_path = temp_dir.join("second");
 
-        fs::create_dir_all(&left_path).unwrap();
-        fs::create_dir_all(&right_path).unwrap();
+        fs::create_dir_all(&first_path).unwrap();
+        fs::create_dir_all(&second_path).unwrap();
 
-        let app = App::new(left_path.clone(), right_path.clone());
+        let app = App::new(first_path.clone(), second_path.clone());
 
-        assert_eq!(app.left_panel.path, left_path);
-        assert_eq!(app.right_panel.path, right_path);
-        assert_eq!(app.active_panel, PanelSide::Left);
-        assert_eq!(app.current_screen, Screen::DualPanel);
+        assert_eq!(app.panels[0].path, first_path);
+        assert_eq!(app.panels[1].path, second_path);
+        assert_eq!(app.active_panel_index, 0);
+        assert_eq!(app.current_screen, Screen::FilePanel);
         assert!(app.dialog.is_none());
         assert!(app.message.is_none());
 
@@ -4392,18 +4437,18 @@ mod tests {
     #[test]
     fn test_app_switch_panel() {
         let temp_dir = create_temp_dir();
-        fs::create_dir_all(temp_dir.join("left")).unwrap();
-        fs::create_dir_all(temp_dir.join("right")).unwrap();
+        fs::create_dir_all(temp_dir.join("panel1")).unwrap();
+        fs::create_dir_all(temp_dir.join("panel2")).unwrap();
 
-        let mut app = App::new(temp_dir.join("left"), temp_dir.join("right"));
+        let mut app = App::new(temp_dir.join("panel1"), temp_dir.join("panel2"));
 
-        assert_eq!(app.active_panel, PanelSide::Left);
-
-        app.switch_panel();
-        assert_eq!(app.active_panel, PanelSide::Right);
+        assert_eq!(app.active_panel_index, 0);
 
         app.switch_panel();
-        assert_eq!(app.active_panel, PanelSide::Left);
+        assert_eq!(app.active_panel_index, 1);
+
+        app.switch_panel();
+        assert_eq!(app.active_panel_index, 0);
 
         cleanup_temp_dir(&temp_dir);
     }
@@ -4534,10 +4579,12 @@ mod tests {
     // ========== Enum tests ==========
 
     #[test]
-    fn test_panel_side_equality() {
-        assert_eq!(PanelSide::Left, PanelSide::Left);
-        assert_eq!(PanelSide::Right, PanelSide::Right);
-        assert_ne!(PanelSide::Left, PanelSide::Right);
+    fn test_panel_index_equality() {
+        let idx_a: usize = 0;
+        let idx_b: usize = 1;
+        assert_eq!(idx_a, 0);
+        assert_eq!(idx_b, 1);
+        assert_ne!(idx_a, idx_b);
     }
 
     #[test]
@@ -4549,9 +4596,9 @@ mod tests {
 
     #[test]
     fn test_screen_equality() {
-        assert_eq!(Screen::DualPanel, Screen::DualPanel);
+        assert_eq!(Screen::FilePanel, Screen::FilePanel);
         assert_eq!(Screen::FileViewer, Screen::FileViewer);
-        assert_ne!(Screen::DualPanel, Screen::Help);
+        assert_ne!(Screen::FilePanel, Screen::Help);
     }
 
     #[test]

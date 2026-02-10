@@ -13,6 +13,7 @@ const shortcutGroups = [
       { key: 'PgUp / PgDn', action: 'Move 10 lines' },
       { key: '/', action: 'Go to path / Search bookmarks' },
       { key: "'", action: 'Toggle bookmark' },
+      { key: '0 / 9', action: 'Add / Close panel' },
       { key: '1 / 2', action: 'Home / Refresh' },
       { key: 'q', action: 'Quit' },
     ],

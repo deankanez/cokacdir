@@ -121,8 +121,11 @@ fn calculate_dir_size_recursive(path: &Path, cancel_flag: &AtomicBool) -> DirCal
             }
 
             let entry_path = entry.path();
-            if let Ok(metadata) = entry.metadata() {
-                if metadata.is_dir() {
+            if let Ok(metadata) = fs::symlink_metadata(&entry_path) {
+                if metadata.file_type().is_symlink() {
+                    // Symlink: count as file with size 0, don't follow
+                    file_count += 1;
+                } else if metadata.is_dir() {
                     dir_count += 1;
                     // Recursively calculate subdirectory
                     let sub_result = calculate_dir_size_recursive(&entry_path, cancel_flag);
@@ -155,8 +158,8 @@ fn get_spinner_frame() -> char {
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    // Draw dual panel in background first
-    super::draw::draw_dual_panel_background(frame, app, area, theme);
+    // Draw panels in background first
+    super::draw::draw_panel_background(frame, app, area, theme);
 
     // Build content first to calculate required height
     let path = &app.info_file_path;
@@ -395,5 +398,5 @@ pub fn handle_input(app: &mut App, code: KeyCode) {
         state.cancel(); // Cancel any ongoing calculation
     }
     app.file_info_state = None;
-    app.current_screen = Screen::DualPanel;
+    app.current_screen = Screen::FilePanel;
 }

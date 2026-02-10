@@ -225,7 +225,7 @@ pub fn handle_input(app: &mut App, code: KeyCode) {
 
     match code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-            app.current_screen = Screen::DualPanel;
+            app.current_screen = Screen::FilePanel;
         }
         KeyCode::Up => {
             if app.process_selected_index > 0 {

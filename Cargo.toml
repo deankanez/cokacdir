@@ -3,11 +3,11 @@ name = "cokacdir"
 version = "0.4.22"
 edition = "2021"
 authors = ["cokac <monogatree@gmail.com>"]
-description = "Dual-panel terminal file manager with AI-powered natural language commands"
+description = "Multi-panel terminal file manager with AI-powered natural language commands"
 license = "MIT"
 repository = "https://github.com/kstost/cokacdir"
 homepage = "https://cokacdir.cokac.com"
-keywords = ["terminal", "cli", "file-manager", "dual-panel", "tui", "ai"]
+keywords = ["terminal", "cli", "file-manager", "multi-panel", "tui", "ai"]
 categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]

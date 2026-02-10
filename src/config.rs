@@ -57,12 +57,6 @@ impl Default for ThemeSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
-    pub left_panel: PanelSettings,
-    #[serde(default)]
-    pub right_panel: PanelSettings,
-    #[serde(default = "default_active_panel")]
-    pub active_panel: String,
-    #[serde(default)]
     pub theme: ThemeSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tar_path: Option<String>,
@@ -75,10 +69,12 @@ pub struct Settings {
     /// Bookmarked paths for quick navigation
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bookmarked_path: Vec<String>,
-}
-
-fn default_active_panel() -> String {
-    "left".to_string()
+    /// Panel settings (multi-panel support)
+    #[serde(default)]
+    pub panels: Vec<PanelSettings>,
+    /// Active panel index
+    #[serde(default)]
+    pub active_panel_index: usize,
 }
 
 impl Default for Settings {
@@ -110,13 +106,12 @@ impl Default for Settings {
         );
 
         Self {
-            left_panel: PanelSettings::default(),
-            right_panel: PanelSettings::default(),
-            active_panel: default_active_panel(),
             theme: ThemeSettings::default(),
             tar_path: None,
             extension_handler,
             bookmarked_path: Vec::new(),
+            panels: vec![PanelSettings::default(), PanelSettings::default()],
+            active_panel_index: 0,
         }
     }
 }
@@ -242,25 +237,9 @@ impl Settings {
         Ok(())
     }
 
-    /// Returns a valid start path for the left panel
-    /// Falls back to current directory, then home directory, then root
-    pub fn left_start_path(&self) -> PathBuf {
-        self.resolve_path(&self.left_panel.start_path, || {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
-        })
-    }
-
-    /// Returns a valid start path for the right panel
-    /// Falls back to home directory, then root
-    pub fn right_start_path(&self) -> PathBuf {
-        self.resolve_path(&self.right_panel.start_path, || {
-            dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
-        })
-    }
-
     /// Resolves a path setting to a valid directory
     /// Security: Only accepts absolute paths and canonicalizes to resolve symlinks
-    fn resolve_path<F>(&self, path_opt: &Option<String>, fallback: F) -> PathBuf
+    pub fn resolve_path<F>(&self, path_opt: &Option<String>, fallback: F) -> PathBuf
     where
         F: FnOnce() -> PathBuf,
     {
@@ -321,19 +300,19 @@ mod tests {
     #[test]
     fn test_default_settings() {
         let settings = Settings::default();
-        assert_eq!(settings.active_panel, "left");
-        assert_eq!(settings.left_panel.sort_by, "name");
-        assert_eq!(settings.left_panel.sort_order, "asc");
+        assert_eq!(settings.panels.len(), 2);
+        assert_eq!(settings.panels[0].sort_by, "name");
+        assert_eq!(settings.panels[0].sort_order, "asc");
+        assert_eq!(settings.active_panel_index, 0);
         assert_eq!(settings.theme.name, DEFAULT_THEME_NAME);
     }
 
     #[test]
     fn test_parse_partial_json() {
-        let json = r#"{"left_panel":{"start_path":"/tmp"}}"#;
+        let json = r#"{"panels":[{"start_path":"/tmp"}]}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.left_panel.start_path, Some("/tmp".to_string()));
-        assert_eq!(settings.left_panel.sort_by, "name");
-        assert_eq!(settings.right_panel.sort_by, "name");
+        assert_eq!(settings.panels[0].start_path, Some("/tmp".to_string()));
+        assert_eq!(settings.panels[0].sort_by, "name");
     }
 
     #[test]

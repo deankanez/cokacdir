@@ -11,6 +11,7 @@ use ratatui::{
 };
 
 use super::theme::Theme;
+use crate::utils::format::safe_suffix;
 
 /// 검색 결과 아이템
 #[derive(Debug, Clone)]
@@ -119,12 +120,13 @@ pub fn recursive_search(
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
 
-            let metadata = match entry.metadata() {
+            let metadata = match fs::symlink_metadata(&path) {
                 Ok(m) => m,
                 Err(_) => continue,
             };
 
-            let is_directory = metadata.is_dir();
+            // Symlink targets: don't follow into directories to avoid cycles
+            let is_directory = metadata.is_dir() && !metadata.file_type().is_symlink();
 
             // 파일명이 검색어를 포함하는지 확인 (대소문자 무시)
             if name.to_lowercase().contains(&lower_term) {
@@ -274,8 +276,8 @@ pub fn draw(
 
         // 경로가 너무 길면 앞부분을 ...로 생략
         let path_str = if path_display.len() > path_width {
-            let skip = path_display.len() - path_width + 3;
-            format!("{:.<width$}", &path_display[skip..], width = path_width)
+            let suffix = safe_suffix(&path_display, path_width.saturating_sub(3));
+            format!("{:.<width$}", suffix, width = path_width)
         } else {
             format!("{:<width$}", path_display, width = path_width)
         };

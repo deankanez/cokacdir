@@ -1,3 +1,56 @@
+// === UTF-8 safe string slicing utilities ===
+
+/// Byte index를 가장 가까운 char boundary로 내림
+pub fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Byte index를 가장 가까운 char boundary로 올림
+fn ceil_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
+/// 문자열 뒤에서 max_bytes 이내의 char boundary에서 자름 (앞부분 생략용)
+pub fn safe_suffix(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let start = s.len() - max_bytes;
+    let boundary = ceil_char_boundary(s, start);
+    &s[boundary..]
+}
+
+/// 문자열 앞에서 max_bytes 이내의 char boundary에서 자름 (뒷부분 생략용)
+pub fn safe_prefix(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let boundary = floor_char_boundary(s, max_bytes);
+    &s[..boundary]
+}
+
+/// String::truncate의 안전한 버전
+pub fn safe_truncate(s: &mut String, max_bytes: usize) {
+    if s.len() > max_bytes {
+        let boundary = floor_char_boundary(s, max_bytes);
+        s.truncate(boundary);
+    }
+}
+
 /// Format file size in human-readable format
 pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
