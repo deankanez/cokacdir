@@ -112,7 +112,6 @@ fn transfer_rsync(
 
     for source_file in &config.source_files {
         if cancel_flag.load(Ordering::Relaxed) {
-            let _ = tx.send(ProgressMessage::Completed(0, 0));
             return Ok(());
         }
 
@@ -153,7 +152,6 @@ fn transfer_rsync(
                 if cancel_flag.load(Ordering::Relaxed) {
                     let _ = child.kill();
                     let _ = child.wait(); // Reap zombie process
-                    let _ = tx.send(ProgressMessage::Completed(0, 0));
                     return Ok(());
                 }
 
@@ -220,7 +218,6 @@ fn transfer_scp(
 ) -> Result<(), String> {
     for source_file in &config.source_files {
         if cancel_flag.load(Ordering::Relaxed) {
-            let _ = tx.send(ProgressMessage::Completed(0, 0));
             return Ok(());
         }
 
@@ -299,7 +296,6 @@ fn transfer_sftp(
 
     for source_file in &config.source_files {
         if cancel_flag.load(Ordering::Relaxed) {
-            let _ = tx.send(ProgressMessage::Completed(0, 0));
             return Ok(());
         }
 
@@ -443,11 +439,138 @@ pub fn transfer_files_with_progress(
 
     match result {
         Ok(_) => {
-            let _ = tx.send(ProgressMessage::Completed(total_files, 0));
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = tx.send(ProgressMessage::Completed(0, 0));
+            } else {
+                let _ = tx.send(ProgressMessage::Completed(total_files, 0));
+            }
         }
         Err(ref msg) => {
             // Ensure error is sent via channel (some paths may not send it)
             let _ = tx.send(ProgressMessage::Error(String::new(), msg.clone()));
+            let _ = tx.send(ProgressMessage::Completed(0, total_files));
+        }
+    }
+}
+
+/// Transfer files between two remote servers via local temp directory
+/// Phase 1: Download from source remote to local temp
+/// Phase 2: Upload from local temp to target remote
+pub fn transfer_remote_to_remote_with_progress(
+    source_profile: RemoteProfile,
+    target_profile: RemoteProfile,
+    source_files: Vec<PathBuf>,
+    source_base: String,
+    target_path: String,
+    cancel_flag: Arc<AtomicBool>,
+    tx: Sender<ProgressMessage>,
+) {
+    let total_files = source_files.len();
+
+    let _ = tx.send(ProgressMessage::Preparing(format!(
+        "Transferring {} file(s) between remote servers...",
+        total_files
+    )));
+
+    // Create temp directory under ~/.cokacdir/tmp/
+    let temp_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let base_tmp = dirs::home_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".cokacdir")
+        .join("tmp");
+    let temp_dir = base_tmp.join(format!("r2r_{}", temp_id));
+    if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+        let _ = tx.send(ProgressMessage::Error(
+            String::new(),
+            format!("Failed to create temp dir: {}", e),
+        ));
+        let _ = tx.send(ProgressMessage::Completed(0, total_files));
+        return;
+    }
+
+    let _ = tx.send(ProgressMessage::PrepareComplete);
+
+    // Phase 1: Download from source remote to local temp
+    let download_config = TransferConfig {
+        direction: TransferDirection::RemoteToLocal,
+        profile: source_profile,
+        source_files: source_files.clone(),
+        source_base,
+        target_path: temp_dir.display().to_string(),
+    };
+
+    let needs_sshpass_dl = matches!(&download_config.profile.auth, RemoteAuth::Password { .. });
+    let has_sshpass_dl = needs_sshpass_dl && has_sshpass();
+    let use_external_dl = !needs_sshpass_dl || has_sshpass_dl;
+
+    let dl_result = if use_external_dl {
+        if has_rsync() {
+            transfer_rsync(&download_config, &cancel_flag, &tx)
+        } else {
+            transfer_scp(&download_config, &cancel_flag, &tx)
+        }
+    } else {
+        transfer_sftp(&download_config, &cancel_flag, &tx)
+    };
+
+    if let Err(ref msg) = dl_result {
+        let _ = tx.send(ProgressMessage::Error(
+            String::new(),
+            format!("Download failed: {}", msg),
+        ));
+        let _ = tx.send(ProgressMessage::Completed(0, total_files));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return;
+    }
+
+    if cancel_flag.load(Ordering::Relaxed) {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = tx.send(ProgressMessage::Completed(0, 0));
+        return;
+    }
+
+    // Phase 2: Upload from local temp to target remote
+    let upload_config = TransferConfig {
+        direction: TransferDirection::LocalToRemote,
+        profile: target_profile,
+        source_files,
+        source_base: temp_dir.display().to_string(),
+        target_path,
+    };
+
+    let needs_sshpass_ul = matches!(&upload_config.profile.auth, RemoteAuth::Password { .. });
+    let has_sshpass_ul = needs_sshpass_ul && has_sshpass();
+    let use_external_ul = !needs_sshpass_ul || has_sshpass_ul;
+
+    let ul_result = if use_external_ul {
+        if has_rsync() {
+            transfer_rsync(&upload_config, &cancel_flag, &tx)
+        } else {
+            transfer_scp(&upload_config, &cancel_flag, &tx)
+        }
+    } else {
+        transfer_sftp(&upload_config, &cancel_flag, &tx)
+    };
+
+    // Cleanup temp directory
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    match ul_result {
+        Ok(_) => {
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = tx.send(ProgressMessage::Completed(0, 0));
+            } else {
+                let _ = tx.send(ProgressMessage::Completed(total_files, 0));
+            }
+        }
+        Err(ref msg) => {
+            let _ = tx.send(ProgressMessage::Error(
+                String::new(),
+                format!("Upload failed: {}", msg),
+            ));
             let _ = tx.send(ProgressMessage::Completed(0, total_files));
         }
     }

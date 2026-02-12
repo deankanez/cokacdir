@@ -3340,39 +3340,69 @@ impl App {
         let file_paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
 
         if source_remote || target_remote {
-            // Remote transfer: use rsync/scp
-            let profile = if source_remote {
-                self.active_panel().remote_ctx.as_ref().map(|c| c.profile.clone())
-            } else {
-                // Use the other panel's remote profile
-                self.panels.get(target_panel_idx)
-                    .and_then(|p| p.remote_ctx.as_ref().map(|c| c.profile.clone()))
-            };
+            if source_remote && target_remote {
+                // Remote-to-remote: download to local temp, then upload
+                let source_profile = self.active_panel().remote_ctx.as_ref().map(|c| c.profile.clone());
+                let target_profile = self.panels.get(target_panel_idx)
+                    .and_then(|p| p.remote_ctx.as_ref().map(|c| c.profile.clone()));
 
-            if let Some(profile) = profile {
-                let direction = if source_remote {
-                    remote_transfer::TransferDirection::RemoteToLocal
+                match (source_profile, target_profile) {
+                    (Some(src_prof), Some(tgt_prof)) => {
+                        let source_base = source_path.display().to_string();
+                        let target = target_path.display().to_string();
+
+                        thread::spawn(move || {
+                            remote_transfer::transfer_remote_to_remote_with_progress(
+                                src_prof,
+                                tgt_prof,
+                                file_paths,
+                                source_base,
+                                target,
+                                cancel_flag,
+                                tx,
+                            );
+                        });
+                    }
+                    _ => {
+                        self.show_message("Error: Remote profile not found");
+                        return;
+                    }
+                }
+            } else {
+                // One-direction remote transfer: use rsync/scp
+                let profile = if source_remote {
+                    self.active_panel().remote_ctx.as_ref().map(|c| c.profile.clone())
                 } else {
-                    remote_transfer::TransferDirection::LocalToRemote
+                    // Use the other panel's remote profile
+                    self.panels.get(target_panel_idx)
+                        .and_then(|p| p.remote_ctx.as_ref().map(|c| c.profile.clone()))
                 };
 
-                let source_base = source_path.display().to_string();
-                let target = target_path.display().to_string();
+                if let Some(profile) = profile {
+                    let direction = if source_remote {
+                        remote_transfer::TransferDirection::RemoteToLocal
+                    } else {
+                        remote_transfer::TransferDirection::LocalToRemote
+                    };
 
-                let config = remote_transfer::TransferConfig {
-                    direction,
-                    profile,
-                    source_files: file_paths,
-                    source_base,
-                    target_path: target,
-                };
+                    let source_base = source_path.display().to_string();
+                    let target = target_path.display().to_string();
 
-                thread::spawn(move || {
-                    remote_transfer::transfer_files_with_progress(config, cancel_flag, tx);
-                });
-            } else {
-                self.show_message("Error: Remote profile not found");
-                return;
+                    let config = remote_transfer::TransferConfig {
+                        direction,
+                        profile,
+                        source_files: file_paths,
+                        source_base,
+                        target_path: target,
+                    };
+
+                    thread::spawn(move || {
+                        remote_transfer::transfer_files_with_progress(config, cancel_flag, tx);
+                    });
+                } else {
+                    self.show_message("Error: Remote profile not found");
+                    return;
+                }
             }
         } else {
             // Local copy
@@ -3678,6 +3708,63 @@ impl App {
             if clipboard.operation == ClipboardOperation::Cut {
                 self.clipboard = Some(clipboard);
                 self.show_message("Move (cut) is not supported for remote transfers");
+                return;
+            }
+
+            // Remote-to-remote: download to local temp, then upload
+            if source_is_remote && target_is_remote {
+                let source_profile = match clipboard.source_remote_profile.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.clipboard = Some(clipboard);
+                        self.show_message("Source remote profile not found");
+                        return;
+                    }
+                };
+                let target_profile = match target_remote_profile {
+                    Some(p) => p,
+                    None => {
+                        self.clipboard = Some(clipboard);
+                        self.show_message("Target remote profile not found");
+                        return;
+                    }
+                };
+
+                let target_path = self.active_panel().path.clone();
+                let file_paths: Vec<PathBuf> = clipboard.files.iter().map(PathBuf::from).collect();
+                let source_base = clipboard.source_path.display().to_string();
+                let target = target_path.display().to_string();
+
+                let mut progress = FileOperationProgress::new(FileOperationType::Copy);
+                progress.is_active = true;
+                let cancel_flag = progress.cancel_flag.clone();
+                let (tx, rx) = mpsc::channel();
+                progress.receiver = Some(rx);
+
+                thread::spawn(move || {
+                    remote_transfer::transfer_remote_to_remote_with_progress(
+                        source_profile,
+                        target_profile,
+                        file_paths,
+                        source_base,
+                        target,
+                        cancel_flag,
+                        tx,
+                    );
+                });
+
+                self.file_operation_progress = Some(progress);
+                self.dialog = Some(Dialog {
+                    dialog_type: DialogType::Progress,
+                    input: String::new(),
+                    cursor_pos: 0,
+                    message: String::new(),
+                    completion: None,
+                    selected_button: 0,
+                    selection: None,
+                });
+
+                self.clipboard = Some(clipboard);
                 return;
             }
 
