@@ -207,13 +207,13 @@ export default function FileOperations() {
                       <span className="text-accent-cyan">{'feh {{FILEPATH}}'}</span>
                     </div>
                     <div className="mt-2">
-                      <span className="text-zinc-500"># PDF를 evince로 열기 (GUI 앱은 @를 앞에 붙임)</span>
+                      <span className="text-zinc-500"># PDF를 evince로 열기 (끝날 때까지 기다리지 않으려면 @를 붙임)</span>
                     </div>
                     <div>
                       <span className="text-accent-cyan">{'@evince {{FILEPATH}}'}</span>
                     </div>
                     <div className="mt-2">
-                      <span className="text-zinc-500"># 터미널 앱(vim 등)으로 열기</span>
+                      <span className="text-zinc-500"># 끝날 때까지 기다리는 프로그램 (vim 등)</span>
                     </div>
                     <div>
                       <span className="text-accent-cyan">{'vim {{FILEPATH}}'}</span>
@@ -233,11 +233,13 @@ export default function FileOperations() {
               <code className="text-accent-cyan font-mono bg-bg-elevated px-1.5 py-0.5 rounded text-sm">@</code> 접두어 — 백그라운드 실행
             </div>
             <p className="text-zinc-400 text-sm leading-relaxed">
-              명령어 앞에 <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code>를 붙이면 프로그램이 백그라운드에서 실행됩니다.
-              <strong className="text-zinc-300"> GUI 프로그램</strong>(evince, feh, vlc, gimp 등)은 <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code>를 붙여야
-              cokacdir 화면이 멈추지 않고 바로 돌아옵니다.
-              <strong className="text-zinc-300"> 터미널 프로그램</strong>(vim, nano, less 등)은 <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code> 없이 입력하면
-              화면을 넘겨주고, 프로그램 종료 후 cokacdir로 돌아옵니다.
+              <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code><strong className="text-zinc-300"> 있음</strong> —
+              프로그램을 띄우고 <strong className="text-zinc-300">cokacdir로 즉시 복귀</strong>합니다.
+              프로그램이 끝날 때까지 기다리지 않습니다. (예: evince, feh, vlc, 백그라운드 스크립트 등)
+              <br />
+              <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code><strong className="text-zinc-300"> 없음</strong> —
+              화면을 프로그램에 넘기고, <strong className="text-zinc-300">프로그램이 끝날 때까지 대기</strong>합니다.
+              종료 후 cokacdir로 돌아옵니다. (예: vim, nano, less 등)
             </p>
           </div>
 
@@ -459,13 +461,13 @@ export default function FileOperations() {
                       <span className="text-accent-cyan">{'feh {{FILEPATH}}'}</span>
                     </div>
                     <div className="mt-2">
-                      <span className="text-zinc-500"># Open PDFs with evince (prefix @ for GUI apps)</span>
+                      <span className="text-zinc-500"># Open PDFs with evince (@ = don't wait for it to finish)</span>
                     </div>
                     <div>
                       <span className="text-accent-cyan">{'@evince {{FILEPATH}}'}</span>
                     </div>
                     <div className="mt-2">
-                      <span className="text-zinc-500"># Open with a terminal app (vim, etc.)</span>
+                      <span className="text-zinc-500"># Wait for the program to finish (vim, etc.)</span>
                     </div>
                     <div>
                       <span className="text-accent-cyan">{'vim {{FILEPATH}}'}</span>
@@ -485,11 +487,13 @@ export default function FileOperations() {
               <code className="text-accent-cyan font-mono bg-bg-elevated px-1.5 py-0.5 rounded text-sm">@</code> Prefix — Background Execution
             </div>
             <p className="text-zinc-400 text-sm leading-relaxed">
-              Prefix a command with <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code> to run it in the background.
-              <strong className="text-zinc-300"> GUI programs</strong> (evince, feh, vlc, gimp, etc.) should use <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code> so
-              cokacdir returns immediately without waiting.
-              <strong className="text-zinc-300"> Terminal programs</strong> (vim, nano, less, etc.) should be used without <code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code> —
-              the screen is handed over to the program, and cokacdir resumes after it exits.
+              <strong className="text-zinc-300">With </strong><code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code> —
+              launches the program and <strong className="text-zinc-300">returns to cokacdir immediately</strong>.
+              Does not wait for the program to finish. (e.g., evince, feh, vlc, background scripts)
+              <br />
+              <strong className="text-zinc-300">Without </strong><code className="text-accent-cyan font-mono bg-bg-elevated px-1 py-0.5 rounded">@</code> —
+              hands the screen to the program and <strong className="text-zinc-300">waits until it finishes</strong>.
+              cokacdir resumes after the program exits. (e.g., vim, nano, less)
             </p>
           </div>
 

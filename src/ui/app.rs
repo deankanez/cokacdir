@@ -2135,10 +2135,10 @@ impl App {
     /// Returns Err(error_message) if all handlers failed
     ///
     /// Handler prefix:
-    /// - No prefix: Foreground execution (suspends TUI, runs command, restores TUI)
-    ///   Example: "vim {{FILEPATH}}" - for TUI apps like vim, nano, less
-    /// - @ prefix: Background execution (for GUI apps like evince, feh, vlc)
-    ///   Example: "@evince {{FILEPATH}}" - spawns detached, cokacdir continues
+    /// - No prefix: Foreground execution (suspends TUI, runs command, waits for exit, restores TUI)
+    ///   Example: "vim {{FILEPATH}}" - hands over terminal, blocks until program exits
+    /// - @ prefix: Background execution (spawns detached, returns to cokacdir immediately)
+    ///   Example: "@evince {{FILEPATH}}" - does not wait for program to finish
     pub fn try_extension_handler(&mut self, path: &std::path::Path) -> Result<bool, String> {
         // Get file extension
         let extension = match path.extension() {
