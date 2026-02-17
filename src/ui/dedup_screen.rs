@@ -198,23 +198,56 @@ pub fn draw(frame: &mut Frame, state: &mut DedupScreenState, area: Rect, theme: 
     let inner_height = chunks[1].height.saturating_sub(2) as usize; // borders
 
     let skip_count = state.log_scroll.saturating_sub(inner_height.saturating_sub(1));
+    let ca = Style::default().fg(colors.log_text);
+    let cb = Style::default().fg(colors.log_text_alt);
     let log_lines: Vec<Line> = state
         .log_lines
         .iter()
-        .enumerate()
         .skip(skip_count)
         .take(inner_height)
-        .map(|(idx, line)| {
-            let color = if line.starts_with("[ERROR]") {
-                colors.log_error
-            } else if line.starts_with("REMOVE") {
-                colors.log_deleted
-            } else if idx % 2 == 0 {
-                colors.log_text
+        .map(|line| {
+            if line.starts_with("[ERROR]") {
+                Line::from(Span::styled(line.as_str(), Style::default().fg(colors.log_error)))
+            } else if line.starts_with("REMOVE ") {
+                // REMOVE {hash} {path}
+                let rest = &line[7..];
+                if let Some(sp) = rest.find(' ') {
+                    Line::from(vec![
+                        Span::styled("REMOVE ", Style::default().fg(colors.log_deleted)),
+                        Span::styled(&rest[..sp], ca),
+                        Span::styled(&rest[sp..], cb),
+                    ])
+                } else {
+                    Line::from(Span::styled(line.as_str(), Style::default().fg(colors.log_deleted)))
+                }
+            } else if line.starts_with("READING ") {
+                // READING {path}
+                Line::from(vec![
+                    Span::styled("READING ", ca),
+                    Span::styled(&line[8..], cb),
+                ])
+            } else if let Some(pct_pos) = line.find(" % ") {
+                // {hash} {pct} % {size} {path}
+                let before = &line[..pct_pos];
+                if let Some(hash_end) = before.rfind(' ') {
+                    let after = &line[pct_pos + 3..];
+                    if let Some(size_end_rel) = after.find(' ') {
+                        let size_end = pct_pos + 3 + size_end_rel;
+                        Line::from(vec![
+                            Span::styled(&line[..hash_end], ca),
+                            Span::styled(&line[hash_end..pct_pos + 3], cb),
+                            Span::styled(&line[pct_pos + 3..size_end], ca),
+                            Span::styled(&line[size_end..], cb),
+                        ])
+                    } else {
+                        Line::from(Span::styled(line.as_str(), ca))
+                    }
+                } else {
+                    Line::from(Span::styled(line.as_str(), ca))
+                }
             } else {
-                colors.log_text_alt
-            };
-            Line::from(Span::styled(line.as_str(), Style::default().fg(color)))
+                Line::from(Span::styled(line.as_str(), ca))
+            }
         })
         .collect();
 
