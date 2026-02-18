@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Github, BookOpen } from 'lucide-react'
 import TutorialSidebar from './TutorialSidebar'
@@ -37,10 +37,18 @@ function LanguageToggle() {
 
 function TutorialPageInner() {
   const { t } = useLanguage()
+  const location = useLocation()
+  const scrollTarget = (location.state as { scrollTo?: string })?.scrollTo
 
   useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [])
+    if (scrollTarget) {
+      setTimeout(() => {
+        document.getElementById(scrollTarget)?.scrollIntoView({ behavior: 'smooth' })
+      }, 100)
+    } else {
+      window.scrollTo(0, 0)
+    }
+  }, [scrollTarget])
 
   return (
     <div className="min-h-screen bg-bg-dark">

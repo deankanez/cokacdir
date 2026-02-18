@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Github, Cloud, Server, Bot, Terminal, Copy, Check, Monitor, Apple, Rocket, MessageCircle } from 'lucide-react'
 
@@ -83,6 +83,8 @@ function InlineStep({ n, children }: { n: number; children: React.ReactNode }) {
 }
 
 export default function EC2Page() {
+  const navigate = useNavigate()
+
   useEffect(() => {
     window.scrollTo(0, 0)
   }, [])
@@ -338,13 +340,24 @@ export default function EC2Page() {
               </InlineStep>
 
               <div className="mt-2">
-                <Link
-                  to="/tutorial#telegram-bot"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-accent-cyan/30 bg-accent-cyan/5 text-accent-cyan text-sm font-medium hover:bg-accent-cyan/10 transition-colors"
+                <button
+                  onClick={() => {
+                    navigate('/tutorial', { state: { scrollTo: 'telegram-workflow' } })
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-accent-cyan/30 bg-accent-cyan/5 text-accent-cyan text-sm font-medium hover:bg-accent-cyan/10 transition-colors cursor-pointer"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  Telegram 원격 제어 — 자세히 보기 →
-                </Link>
+                  실전 사용 워크플로우 — 자세히 보기 →
+                </button>
+                <button
+                  onClick={() => {
+                    navigate('/tutorial', { state: { scrollTo: 'telegram-commands' } })
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-accent-cyan/30 bg-accent-cyan/5 text-accent-cyan text-sm font-medium hover:bg-accent-cyan/10 transition-colors cursor-pointer"
+                >
+                  <Terminal className="w-4 h-4" />
+                  사용 가능한 명령어 — 자세히 보기 →
+                </button>
               </div>
             </div>
           </motion.section>
