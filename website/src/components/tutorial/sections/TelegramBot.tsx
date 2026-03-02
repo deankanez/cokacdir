@@ -220,55 +220,30 @@ export default function TelegramBot() {
             <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
               <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
                 <span className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 text-sm flex items-center justify-center flex-shrink-0">{'🪟'}</span>
-                Windows (WSL 필수)
+                Windows
               </h4>
               <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
-                cokacdir는 Unix 기반 프로그램이므로, Windows에서는 <strong className="text-white">WSL (Windows Subsystem for Linux)</strong>을 통해 실행해야 합니다.
-                WSL은 Windows 안에서 Linux 환경을 실행할 수 있게 해주는 공식 기능입니다.
+                cokacdir은 Windows에서 네이티브로 실행됩니다. WSL 없이도 사용할 수 있습니다.
+                <strong className="text-zinc-300"> PowerShell</strong>을 열고 아래 명령어를 실행하세요.
               </p>
-
-              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
-                <div className="text-zinc-400 font-semibold mb-2">WSL이 아직 설치되지 않은 경우:</div>
-                <p className="text-zinc-400 mb-2 leading-relaxed">
-                  <strong className="text-zinc-300">PowerShell</strong>을 <strong className="text-zinc-300">관리자 권한</strong>으로 열고 다음 명령어를 실행합니다:
-                </p>
-                <code className="block text-accent-cyan font-mono bg-bg-card px-3 py-2 rounded">
-                  wsl --install
-                </code>
-                <p className="text-zinc-400 mt-2 leading-relaxed">
-                  설치가 완료되면 컴퓨터를 재시작합니다. 재시작 후 자동으로 Ubuntu가 설치되며,
-                  사용자 이름과 비밀번호를 설정하라는 안내가 나옵니다.
-                </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
+                <div className="text-zinc-500 mb-1"># PowerShell에서 서버 시작</div>
+                <div className="text-accent-cyan">{'& "$env:USERPROFILE\\cokacdir.exe" --ccserver YOUR_BOT_TOKEN'}</div>
               </div>
-
-              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
-                <div className="text-zinc-400 font-semibold mb-2">WSL에서 cokacdir 실행:</div>
-                <p className="text-zinc-400 mb-2 leading-relaxed">
-                  시작 메뉴에서 <strong className="text-zinc-300">Ubuntu</strong> (또는 설치한 Linux 배포판)를 실행합니다.
-                  열리는 터미널이 Linux 환경입니다. 여기서 cokacdir를 설치하고 Bot 서버를 실행합니다.
+              <p className="text-zinc-500 text-xs mt-2">
+                Windows의 경로 예시: <code className="font-mono">C:\Users\username\Documents</code>
+              </p>
+              <div className="mt-3 p-3 rounded-lg border border-accent-cyan/20 bg-accent-cyan/5">
+                <p className="text-zinc-400 text-sm leading-relaxed">
+                  Windows에서의 설치 및 설정에 대한 상세 안내는{' '}
+                  <a href="/#/windows" className="text-accent-cyan hover:underline font-medium">Windows 셋업 가이드</a>를 참고하세요.
                 </p>
-                <div className="font-mono">
-                  <div className="text-zinc-500 mb-1"># WSL 터미널에서 실행</div>
-                  <div className="text-accent-cyan">cokacdir --ccserver YOUR_BOT_TOKEN</div>
-                </div>
-              </div>
-
-              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm">
-                <div className="text-zinc-400 font-semibold mb-2">Windows 파일에 접근하기:</div>
-                <p className="text-zinc-400 leading-relaxed">
-                  WSL 안에서 Windows의 파일에 접근할 수 있습니다.
-                  Windows의 <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">C:\Users\username\Documents</code> 폴더는
-                  WSL에서 <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">/mnt/c/Users/username/Documents</code> 경로로 접근 가능합니다.
-                </p>
-                <code className="block text-zinc-500 font-mono text-xs bg-bg-card px-3 py-2 rounded mt-2">
-                  /start /mnt/c/Users/username/Documents
-                </code>
               </div>
             </div>
           </div>
 
           <TipBox variant="note">
-            모든 플랫폼에서 공통으로 <strong className="text-zinc-300">Claude CLI</strong> 또는 <strong className="text-zinc-300">Codex CLI</strong> 중 하나가 설치되어 있어야 AI 기능이 동작합니다.
+            모든 플랫폼에서 공통으로 <strong className="text-zinc-300">Claude Code</strong> 또는 <strong className="text-zinc-300">Codex CLI</strong> 중 하나가 설치되어 있어야 AI 기능이 동작합니다.
             둘 다 없으면 Bot 서버는 시작되지만, AI 질문에는 에러가 발생합니다.
           </TipBox>
 
@@ -279,7 +254,7 @@ export default function TelegramBot() {
           </p>
           <div className="bg-bg-card border border-zinc-800 rounded-lg p-4 mb-4">
             <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
-              <div className="text-zinc-500 mb-1"># 백그라운드 실행 (macOS, Linux, WSL 공통)</div>
+              <div className="text-zinc-500 mb-1"># 백그라운드 실행 (macOS, Linux 공통)</div>
               <div className="text-accent-cyan">nohup cokacdir --ccserver YOUR_BOT_TOKEN &amp;</div>
             </div>
             <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
@@ -290,6 +265,13 @@ export default function TelegramBot() {
               <div className="text-zinc-500 mb-1"># Bot 서버 종료</div>
               <div className="text-accent-cyan">pkill -f "cokacdir --ccserver"</div>
             </div>
+          </div>
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-4 mb-4">
+            <div className="text-zinc-400 font-semibold text-sm mb-2">{'🪟'} Windows에서 백그라운드 실행</div>
+            <p className="text-zinc-400 text-sm leading-relaxed mb-3">
+              Windows에서는 <strong className="text-zinc-300">작업 스케줄러</strong>를 사용하여 로그인 시 자동 시작을 설정할 수 있습니다.
+              자세한 내용은 <a href="/#/windows" className="text-accent-cyan hover:underline font-medium">Windows 셋업 가이드</a>의 자동 실행 등록 항목을 참고하세요.
+            </p>
           </div>
 
           <TipBox>
@@ -1093,55 +1075,30 @@ export default function TelegramBot() {
             <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
               <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
                 <span className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 text-sm flex items-center justify-center flex-shrink-0">{'🪟'}</span>
-                Windows (WSL Required)
+                Windows
               </h4>
               <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
-                cokacdir is a Unix-based program, so on Windows you need <strong className="text-white">WSL (Windows Subsystem for Linux)</strong>.
-                WSL is an official Windows feature that runs a Linux environment inside Windows.
+                cokacdir runs natively on Windows. No WSL required.
+                Open <strong className="text-zinc-300">PowerShell</strong> and run the command below.
               </p>
-
-              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
-                <div className="text-zinc-400 font-semibold mb-2">If WSL is not installed yet:</div>
-                <p className="text-zinc-400 mb-2 leading-relaxed">
-                  Open <strong className="text-zinc-300">PowerShell</strong> as <strong className="text-zinc-300">Administrator</strong> and run:
-                </p>
-                <code className="block text-accent-cyan font-mono bg-bg-card px-3 py-2 rounded">
-                  wsl --install
-                </code>
-                <p className="text-zinc-400 mt-2 leading-relaxed">
-                  After installation, restart your computer. Ubuntu will be installed automatically
-                  and you'll be prompted to create a username and password.
-                </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
+                <div className="text-zinc-500 mb-1"># Start server in PowerShell</div>
+                <div className="text-accent-cyan">{'& "$env:USERPROFILE\\cokacdir.exe" --ccserver YOUR_BOT_TOKEN'}</div>
               </div>
-
-              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
-                <div className="text-zinc-400 font-semibold mb-2">Running cokacdir in WSL:</div>
-                <p className="text-zinc-400 mb-2 leading-relaxed">
-                  Open <strong className="text-zinc-300">Ubuntu</strong> (or your installed Linux distro) from the Start menu.
-                  The terminal that opens is a Linux environment. Install cokacdir here and run the Bot server.
+              <p className="text-zinc-500 text-xs mt-2">
+                Windows path example: <code className="font-mono">C:\Users\username\Documents</code>
+              </p>
+              <div className="mt-3 p-3 rounded-lg border border-accent-cyan/20 bg-accent-cyan/5">
+                <p className="text-zinc-400 text-sm leading-relaxed">
+                  For detailed installation and setup instructions, see the{' '}
+                  <a href="/#/windows" className="text-accent-cyan hover:underline font-medium">Windows Setup Guide</a>.
                 </p>
-                <div className="font-mono">
-                  <div className="text-zinc-500 mb-1"># Run in WSL terminal</div>
-                  <div className="text-accent-cyan">cokacdir --ccserver YOUR_BOT_TOKEN</div>
-                </div>
-              </div>
-
-              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm">
-                <div className="text-zinc-400 font-semibold mb-2">Accessing Windows files:</div>
-                <p className="text-zinc-400 leading-relaxed">
-                  You can access your Windows files from inside WSL.
-                  The Windows folder <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">C:\Users\username\Documents</code> is accessible
-                  as <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">/mnt/c/Users/username/Documents</code> in WSL.
-                </p>
-                <code className="block text-zinc-500 font-mono text-xs bg-bg-card px-3 py-2 rounded mt-2">
-                  /start /mnt/c/Users/username/Documents
-                </code>
               </div>
             </div>
           </div>
 
           <TipBox variant="note">
-            <strong className="text-zinc-300">Claude CLI</strong> or <strong className="text-zinc-300">Codex CLI</strong> must be installed on all platforms for AI features to work.
+            <strong className="text-zinc-300">Claude Code</strong> or <strong className="text-zinc-300">Codex CLI</strong> must be installed on all platforms for AI features to work.
             Without either CLI, the Bot server will start but AI queries will return errors.
           </TipBox>
 
@@ -1152,7 +1109,7 @@ export default function TelegramBot() {
           </p>
           <div className="bg-bg-card border border-zinc-800 rounded-lg p-4 mb-4">
             <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
-              <div className="text-zinc-500 mb-1"># Background execution (macOS, Linux, WSL)</div>
+              <div className="text-zinc-500 mb-1"># Background execution (macOS, Linux)</div>
               <div className="text-accent-cyan">nohup cokacdir --ccserver YOUR_BOT_TOKEN &amp;</div>
             </div>
             <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
@@ -1163,6 +1120,13 @@ export default function TelegramBot() {
               <div className="text-zinc-500 mb-1"># Stop the Bot server</div>
               <div className="text-accent-cyan">pkill -f "cokacdir --ccserver"</div>
             </div>
+          </div>
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-4 mb-4">
+            <div className="text-zinc-400 font-semibold text-sm mb-2">{'🪟'} Background execution on Windows</div>
+            <p className="text-zinc-400 text-sm leading-relaxed mb-3">
+              On Windows, use <strong className="text-zinc-300">Task Scheduler</strong> to auto-start the bot on login.
+              See the <a href="/#/windows" className="text-accent-cyan hover:underline font-medium">Windows Setup Guide</a> for details.
+            </p>
           </div>
 
           <TipBox>
