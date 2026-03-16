@@ -95,11 +95,15 @@ fn codex_debug_log(msg: &str) {
 /// Execute a command using Codex CLI with streaming output.
 ///
 /// Parameters mirror `claude::execute_command_streaming` for consistency,
-/// but some are ignored (session_id, allowed_tools, no_session_persistence)
+/// but some are ignored (allowed_tools, no_session_persistence)
 /// because Codex exec has no tool restriction support.
+///
+/// When `session_id` is Some, uses `codex exec resume` to continue an existing
+/// session (Codex manages conversation history natively). When None, starts a
+/// new session with `codex exec`.
 pub fn execute_command_streaming(
     prompt: &str,
-    _session_id: Option<&str>,        // ignored — Codex exec is always a new session
+    session_id: Option<&str>,
     working_dir: &str,
     sender: Sender<StreamMessage>,
     system_prompt: Option<&str>,
@@ -112,25 +116,45 @@ pub fn execute_command_streaming(
     codex_debug_log("=== codex execute_command_streaming START ===");
     codex_debug_log("========================================");
     codex_debug_log(&format!("prompt_len: {} chars", prompt.len()));
+    codex_debug_log(&format!("session_id: {:?}", session_id));
     codex_debug_log(&format!("working_dir: {}", working_dir));
     codex_debug_log(&format!("model: {:?}", model));
 
-    // Build effective prompt: prepend system prompt if provided
-    let effective_prompt = match system_prompt {
-        Some(sp) if !sp.is_empty() => format!("{}\n\n---\n\n{}", sp, prompt),
-        _ => prompt.to_string(),
+    let resuming = session_id.is_some();
+
+    // Build effective prompt: prepend system prompt only for new sessions
+    // (resumed sessions already have the system prompt from the initial turn)
+    let effective_prompt = if resuming {
+        prompt.to_string()
+    } else {
+        match system_prompt {
+            Some(sp) if !sp.is_empty() => format!("{}\n\n---\n\n{}", sp, prompt),
+            _ => prompt.to_string(),
+        }
     };
 
-    // Build CLI arguments:
-    //   codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -C <dir> [-m <model>] -
-    let mut args = vec![
-        "exec".to_string(),
-        "--json".to_string(),
-        "--dangerously-bypass-approvals-and-sandbox".to_string(),
-        "--skip-git-repo-check".to_string(),
-        "-C".to_string(),
-        working_dir.to_string(),
-    ];
+    // Build CLI arguments
+    let mut args = if let Some(sid) = session_id {
+        // codex exec resume --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check <session_id> -
+        vec![
+            "exec".to_string(),
+            "resume".to_string(),
+            "--json".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "--skip-git-repo-check".to_string(),
+            sid.to_string(),
+        ]
+    } else {
+        // codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -C <dir> -
+        vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "--skip-git-repo-check".to_string(),
+            "-C".to_string(),
+            working_dir.to_string(),
+        ]
+    };
 
     if let Some(m) = model {
         args.push("-m".to_string());

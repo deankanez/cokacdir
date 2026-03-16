@@ -4816,9 +4816,13 @@ async fn handle_text_message(
         msg_debug(&format!("[handle_text_message] use_codex={}, model={:?}", use_codex, model_clone));
         let result = if use_codex {
             let codex_model = model_clone.as_deref().and_then(codex::strip_codex_prefix);
-            // Codex exec is stateless per invocation — inject conversation history into prompt
-            let codex_prompt = if history_clone.is_empty() {
-                context_prompt.clone()
+            // When resuming, Codex manages conversation history natively — no injection needed.
+            // For new sessions (no session_id), inject history into the prompt as context.
+            let (codex_prompt, codex_sp) = if session_id_clone.is_some() {
+                (context_prompt.clone(), None)
+            } else if history_clone.is_empty() {
+                let sp = format!("{}{}", system_prompt_owned, codex_extra_instructions());
+                (context_prompt.clone(), Some(sp))
             } else {
                 let mut conv = String::new();
                 conv.push_str("<conversation_history>\n");
@@ -4834,17 +4838,17 @@ async fn handle_text_message(
                 }
                 conv.push_str("</conversation_history>\n\n");
                 conv.push_str(&context_prompt);
-                conv
+                let sp = format!("{}{}", system_prompt_owned, codex_extra_instructions());
+                (conv, Some(sp))
             };
-            let codex_system_prompt = format!("{}{}", system_prompt_owned, codex_extra_instructions());
-            msg_debug(&format!("[handle_text_message] → codex::execute, codex_model={:?}, codex_prompt_len={}",
-                codex_model, codex_prompt.len()));
+            msg_debug(&format!("[handle_text_message] → codex::execute, codex_model={:?}, codex_prompt_len={}, resume={}",
+                codex_model, codex_prompt.len(), session_id_clone.is_some()));
             codex::execute_command_streaming(
                 &codex_prompt,
                 session_id_clone.as_deref(),
                 &current_path_clone,
                 tx.clone(),
-                Some(&codex_system_prompt),
+                codex_sp.as_deref(),
                 Some(&allowed_tools),
                 Some(cancel_token_clone),
                 codex_model,
@@ -5691,7 +5695,8 @@ fn save_session_to_file(session: &ChatSession, current_path: &str, provider: &st
         let _ = fs::write(&file_path, json);
     }
 
-    // Clean up old session files without session_id (e.g. /clear blocker files)
+    // Clean up old session files for the same path+provider (removes orphaned files
+    // left by Codex's per-call thread_id rotation and /clear blocker files)
     if let Ok(entries) = fs::read_dir(&sessions_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let p = entry.path();
@@ -5701,7 +5706,6 @@ fn save_session_to_file(session: &ChatSession, current_path: &str, provider: &st
                     if let Ok(old) = serde_json::from_str::<SessionData>(&content) {
                         if old.current_path == current_path
                             && (old.provider == provider || old.provider.is_empty())
-                            && old.session_id.is_empty()
                         {
                             let _ = fs::remove_file(&p);
                         }
@@ -7446,8 +7450,11 @@ async fn process_bot_message(
         msg_debug(&format!("[process_bot_message:spawn_blocking] use_codex={}, model={:?}", use_codex, model_clone));
         let result = if use_codex {
             let codex_model = model_clone.as_deref().and_then(codex::strip_codex_prefix);
-            let codex_prompt = if history_clone.is_empty() {
-                prompt_for_ai.clone()
+            let (codex_prompt, codex_sp) = if session_id_clone.is_some() {
+                (prompt_for_ai.clone(), None)
+            } else if history_clone.is_empty() {
+                let sp = format!("{}{}", system_prompt_owned, codex_extra_instructions());
+                (prompt_for_ai.clone(), Some(sp))
             } else {
                 let mut conv = String::new();
                 conv.push_str("<conversation_history>\n");
@@ -7463,15 +7470,15 @@ async fn process_bot_message(
                 }
                 conv.push_str("</conversation_history>\n\n");
                 conv.push_str(&prompt_for_ai);
-                conv
+                let sp = format!("{}{}", system_prompt_owned, codex_extra_instructions());
+                (conv, Some(sp))
             };
-            let codex_system_prompt = format!("{}{}", system_prompt_owned, codex_extra_instructions());
             codex::execute_command_streaming(
                 &codex_prompt,
                 session_id_clone.as_deref(),
                 &current_path_clone,
                 tx.clone(),
-                Some(&codex_system_prompt),
+                codex_sp.as_deref(),
                 Some(&allowed_tools),
                 Some(cancel_token_clone),
                 codex_model,
