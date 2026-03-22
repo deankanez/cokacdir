@@ -743,6 +743,9 @@ IMPORTANT: Format your responses using Markdown for better readability:
     let mut args = vec![
         "-p".to_string(),
         "--dangerously-skip-permissions".to_string(),
+        "--strict-mcp-config".to_string(),
+        "--mcp-config".to_string(),
+        r#"{"mcpServers":{}}"#.to_string(),
         "--tools".to_string(),
         tools_str,
         "--verbose".to_string(),

@@ -192,21 +192,25 @@ pub fn serialize_payload(entries: &[RawPayloadEntry]) -> String {
 
 
 /// RAII guard for group chat exclusive lock.
-/// Ensures only one bot processes at a time within the same group chat.
 /// Lock is automatically released when the guard is dropped.
 struct GroupChatLock {
     _file: std::fs::File,
 }
 
-/// Acquire exclusive file lock for a group chat (async, non-blocking).
+fn bot_chat_key<S: AsRef<str>>(chat_id: ChatId, bot_key: S) -> String {
+    format!("{}:{}", chat_id.0, bot_key.as_ref())
+}
+
+/// Acquire exclusive file lock for a group chat + bot (async, non-blocking).
 /// Returns None for private chats (chat_id >= 0) or if lock file cannot be created.
 /// For group chats, polls with sleep until the lock is acquired.
-async fn acquire_group_chat_lock(chat_id: i64) -> Option<GroupChatLock> {
+async fn acquire_group_chat_lock(chat_id: i64, bot_key: &str) -> Option<GroupChatLock> {
     use fs2::FileExt;
     if chat_id >= 0 { return None; }
     let dir = dirs::home_dir()?.join(".cokacdir").join("group_chat");
     let _ = std::fs::create_dir_all(&dir);
-    let lock_path = dir.join(format!("{}.lock", chat_id));
+    let safe_bot_key: String = bot_key.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let lock_path = dir.join(format!("{}-{}.lock", chat_id, safe_bot_key));
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -1354,8 +1358,10 @@ fn version_is_newer(a: &str, b: &str) -> bool {
 struct SharedData {
     sessions: HashMap<ChatId, ChatSession>,
     settings: BotSettings,
-    /// Per-chat cancel tokens for stopping in-progress AI requests
-    cancel_tokens: HashMap<ChatId, Arc<CancelToken>>,
+    /// Active leader bot username for ';' broadcast-style collaboration in each chat
+    broadcast_leaders: HashMap<ChatId, String>,
+    /// Per-bot+chat cancel tokens for stopping in-progress AI requests
+    cancel_tokens: HashMap<String, Arc<CancelToken>>,
     /// Message ID of the "Stopping..." message sent by /stop, so the polling loop can update it
     stop_message_ids: HashMap<ChatId, teloxide::types::MessageId>,
     /// Per-chat timestamp of the last Telegram API call (for rate limiting)
@@ -1872,6 +1878,7 @@ pub async fn run_bot(token: &str) {
     let state: SharedState = Arc::new(Mutex::new(SharedData {
         sessions: HashMap::new(),
         settings: bot_settings,
+        broadcast_leaders: HashMap::new(),
         cancel_tokens: HashMap::new(),
         stop_message_ids: HashMap::new(),
         api_timestamps: HashMap::new(),
@@ -1981,6 +1988,7 @@ async fn handle_message(
     bot_username: &str,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id;
+    let bot_key = token_hash(token);
     let raw_user_name = msg.from.as_ref()
         .map(|u| u.first_name.as_str())
         .unwrap_or("unknown");
@@ -2113,14 +2121,14 @@ async fn handle_message(
                     // Block if an AI request is already in progress
                     let ai_busy = {
                         let data = state.lock().await;
-                        data.cancel_tokens.contains_key(&chat_id)
+                        data.cancel_tokens.contains_key(&bot_chat_key(chat_id, &bot_key))
                     };
                     if ai_busy {
                         shared_rate_limit_wait(&state, chat_id).await;
                         tg!("send_message", bot.send_message(chat_id, "AI request in progress. Use /stop to cancel.")
                             .await)?;
                     } else {
-                        handle_text_message(&bot, chat_id, text, &state, &user_name).await?;
+                        handle_text_message(&bot, chat_id, text, &state, &user_name, false).await?;
                     }
                 }
             }
@@ -2276,7 +2284,7 @@ async fn handle_message(
     // Block all messages except /stop while an AI request is in progress
     if !text.starts_with("/stop") {
         let data = state.lock().await;
-        if data.cancel_tokens.contains_key(&chat_id) {
+        if data.cancel_tokens.contains_key(&bot_chat_key(chat_id, &bot_key)) {
             drop(data);
             shared_rate_limit_wait(&state, chat_id).await;
             tg!("send_message", bot.send_message(chat_id, "AI request in progress. Use /stop to cancel.")
@@ -2288,7 +2296,7 @@ async fn handle_message(
     if text.starts_with("/stop") {
         msg_debug(&format!("[handle_message] routing → /stop"));
         println!("  [{timestamp}] ◀ [{user_name}] /stop");
-        handle_stop_command(&bot, chat_id, &state).await?;
+        handle_stop_command(&bot, chat_id, &state, token).await?;
     } else if text.starts_with("/help") {
         msg_debug(&format!("[handle_message] routing → /help"));
         println!("  [{timestamp}] ◀ [{user_name}] /help");
@@ -2365,7 +2373,7 @@ async fn handle_message(
         } else {
             msg_debug(&format!("[handle_message] routing → text_message (/query), body={:?}", truncate_str(body, 80)));
             println!("  [{timestamp}] ◀ [{user_name}] {body}");
-            handle_text_message(&bot, chat_id, body, &state, &user_name).await?;
+            handle_text_message(&bot, chat_id, body, &state, &user_name, false).await?;
         }
     } else if text.starts_with("/instruction_clear") {
         msg_debug("[handle_message] routing → /instruction_clear");
@@ -2402,11 +2410,11 @@ async fn handle_message(
         let preview = &stripped;
         msg_debug(&format!("[handle_message] routing → text_message (;prefix), stripped={:?}", truncate_str(&stripped, 80)));
         println!("  [{timestamp}] ◀ [{user_name}] {preview}");
-        handle_text_message(&bot, chat_id, &stripped, &state, &user_name).await?;
+        handle_text_message(&bot, chat_id, &stripped, &state, &user_name, true).await?;
     } else {
         msg_debug(&format!("[handle_message] routing → text_message (plain), require_prefix={}", require_prefix));
         println!("  [{timestamp}] ◀ [{user_name}] {preview}");
-        handle_text_message(&bot, chat_id, &text, &state, &user_name).await?;
+        handle_text_message(&bot, chat_id, &text, &state, &user_name, false).await?;
     }
 
     Ok(())
@@ -3706,10 +3714,12 @@ async fn handle_stop_command(
     bot: &Bot,
     chat_id: ChatId,
     state: &SharedState,
+    token: &str,
 ) -> ResponseResult<()> {
+    let bot_key = token_hash(token);
     let token = {
         let data = state.lock().await;
-        data.cancel_tokens.get(&chat_id).cloned()
+        data.cancel_tokens.get(&bot_chat_key(chat_id, &bot_key)).cloned()
     };
     msg_debug(&format!("[handle_stop] chat_id={}, has_token={}", chat_id.0, token.is_some()));
 
@@ -3751,7 +3761,7 @@ async fn handle_stop_command(
             // delete the orphaned message immediately instead of inserting.
             {
                 let mut data = state.lock().await;
-                if data.cancel_tokens.contains_key(&chat_id) {
+                if data.cancel_tokens.contains_key(&bot_chat_key(chat_id, &bot_key)) {
                     data.stop_message_ids.insert(chat_id, stop_msg.id);
                 } else {
                     drop(data);
@@ -3995,17 +4005,18 @@ async fn handle_shell_command(
 
     // Register cancel token early (prevents duplicate requests while waiting for group lock)
     let cancel_token = Arc::new(CancelToken::new());
+    let bot_key = token_hash(bot.token());
     {
         let mut data = state.lock().await;
-        data.cancel_tokens.insert(chat_id, cancel_token.clone());
+        data.cancel_tokens.insert(bot_chat_key(chat_id, &bot_key), cancel_token.clone());
     }
 
-    // Acquire group chat lock (serializes processing across bots in the same group chat)
-    let group_lock = acquire_group_chat_lock(chat_id.0).await;
+    // Acquire group chat lock (serializes processing per bot within the same group chat)
+    let group_lock = acquire_group_chat_lock(chat_id.0, &bot_key).await;
 
     // Check if cancelled during lock wait
     if cancel_token.cancelled.load(Ordering::Relaxed) {
-        { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+        { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
         return Ok(());
     }
 
@@ -4029,7 +4040,7 @@ async fn handle_shell_command(
     {
         Ok(m) => m,
         Err(e) => {
-            { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+            { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
             return Err(e);
         }
     };
@@ -4368,7 +4379,7 @@ async fn handle_shell_command(
             }
 
             let mut data = state_owned.lock().await;
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
             data.stop_message_ids.remove(&chat_id);
             return;
         }
@@ -4386,7 +4397,7 @@ async fn handle_shell_command(
         // Release lock
         {
             let mut data = state_owned.lock().await;
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
         }
     });
 
@@ -4950,23 +4961,25 @@ async fn handle_text_message(
     user_text: &str,
     state: &SharedState,
     user_display_name: &str,
+    is_broadcast: bool,
 ) -> ResponseResult<()> {
     msg_debug(&format!("[handle_text_message] START chat_id={}, user_text={:?}",
         chat_id.0, truncate_str(user_text, 100)));
 
     // Register cancel token early (prevents duplicate requests while waiting for group lock)
     let cancel_token = Arc::new(CancelToken::new());
+    let bot_key = token_hash(bot.token());
     {
         let mut data = state.lock().await;
-        data.cancel_tokens.insert(chat_id, cancel_token.clone());
+        data.cancel_tokens.insert(bot_chat_key(chat_id, &bot_key), cancel_token.clone());
     }
 
-    // Acquire group chat lock (serializes processing across bots in the same group chat)
-    let group_lock = acquire_group_chat_lock(chat_id.0).await;
+    // Acquire group chat lock (serializes processing per bot within the same group chat)
+    let group_lock = acquire_group_chat_lock(chat_id.0, &bot_key).await;
 
     // Check if cancelled during lock wait (e.g., user sent /stop)
     if cancel_token.cancelled.load(Ordering::Relaxed) {
-        { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+        { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
         return Ok(());
     }
 
@@ -4998,7 +5011,7 @@ async fn handle_text_message(
     let (session_id, current_path) = match session_info {
         Some(info) => info,
         None => {
-            { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+            { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
             shared_rate_limit_wait(state, chat_id).await;
             tg!("send_message", bot.send_message(chat_id, "No active session. Use /start <path> first.")
                 .await)?;
@@ -5015,7 +5028,7 @@ async fn handle_text_message(
     let placeholder = match tg!("send_message", bot.send_message(chat_id, "...").await) {
         Ok(m) => m,
         Err(e) => {
-            { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+            { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
             return Err(e);
         }
     };
@@ -5052,9 +5065,20 @@ async fn handle_text_message(
 
     // Build system prompt with sendfile and schedule instructions
     let bot_key_for_prompt = token_hash(bot.token());
+    let forced_leader_username = "cokakbot";
+    let am_forced_leader = bot_username_for_prompt.eq_ignore_ascii_case(forced_leader_username);
+    let leadership_note = if is_broadcast {
+        if am_forced_leader {
+            "\n\nLEADERSHIP MODE (BROADCAST): You are the LEADER for this request.\n- Define roles once.\n- Ask other bots only for specific subtasks.\n- Produce the final integrated answer for the user.\n- Prevent duplicate managerial chatter.\n- The designated leader for ';' broadcast is @cokakbot."
+        } else {
+            "\n\nLEADERSHIP MODE (BROADCAST): You are a SUBORDINATE for this request.\n- The designated leader for ';' broadcast is @cokakbot.\n- You are NOT the leader.\n- Do NOT claim there is no leader.\n- Do NOT reassign roles or ask another bot to coordinate.\n- Do NOT ask the user to compare two independent full versions.\n- Provide only your assigned sub-results briefly, then wait for the leader to publish final integration."
+        }
+    } else {
+        ""
+    };
     let role = match &instruction {
-        Some(instr) => format!("You are chatting with a user through Telegram.\n\nUser's instruction for this chat:\n{}", instr),
-        None => "You are chatting with a user through Telegram.".to_string(),
+        Some(instr) => format!("You are chatting with a user through Telegram.\n\nUser's instruction for this chat:\n{}{}", instr, leadership_note),
+        None => format!("You are chatting with a user through Telegram.{}", leadership_note),
     };
     let system_prompt_owned = build_system_prompt(
         &role,
@@ -5787,7 +5811,7 @@ async fn handle_text_message(
                     }
                 }
             }
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
             data.stop_message_ids.remove(&chat_id);
             return;
         }
@@ -5797,7 +5821,7 @@ async fn handle_text_message(
         let orphan_stop_msg = {
             let mut data = state_owned.lock().await;
             let msg_id = data.stop_message_ids.remove(&chat_id);
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
             msg_id
         };
         if let Some(msg_id) = orphan_stop_msg {
@@ -6843,14 +6867,15 @@ async fn execute_schedule(
 ) {
     sched_debug(&format!("[execute_schedule] START id={}, chat_id={}, prompt={:?}, has_context={}, has_prev_session={}",
         entry.id, chat_id, truncate_str(&entry.prompt, 60), entry.context_summary.is_some(), prev_session.is_some()));
+    let bot_key = token_hash(token);
 
-    // Acquire group chat lock (serializes processing across bots in the same group chat)
-    let group_lock = acquire_group_chat_lock(chat_id.0).await;
+    // Acquire group chat lock (serializes processing per bot within the same group chat)
+    let group_lock = acquire_group_chat_lock(chat_id.0, &bot_key).await;
 
     // Check if cancelled during lock wait
     {
         let data = state.lock().await;
-        if let Some(ct) = data.cancel_tokens.get(&chat_id) {
+        if let Some(ct) = data.cancel_tokens.get(&bot_chat_key(chat_id, &bot_key)) {
             if ct.cancelled.load(Ordering::Relaxed) {
                 sched_debug(&format!("[execute_schedule] cancelled during lock wait, id={}", entry.id));
                 return;
@@ -6889,7 +6914,7 @@ async fn execute_schedule(
         if let Some(set) = data.pending_schedules.get_mut(&chat_id) {
             set.remove(&schedule_id);
         }
-        data.cancel_tokens.remove(&chat_id);
+        data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
         if let Some(prev) = prev_session {
             data.sessions.insert(chat_id, prev);
         } else {
@@ -6907,7 +6932,7 @@ async fn execute_schedule(
         if let Some(set) = data.pending_schedules.get_mut(&chat_id) {
             set.remove(&schedule_id);
         }
-        data.cancel_tokens.remove(&chat_id);
+        data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
         if let Some(prev) = prev_session {
             data.sessions.insert(chat_id, prev);
         } else {
@@ -6935,7 +6960,7 @@ async fn execute_schedule(
             if let Some(set) = data.pending_schedules.get_mut(&chat_id) {
                 set.remove(&schedule_id);
             }
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
             if let Some(prev) = prev_session {
                 data.sessions.insert(chat_id, prev);
             } else {
@@ -6995,11 +7020,11 @@ async fn execute_schedule(
     // Retrieve pre-inserted cancel token (from scheduler_loop), or create a new one
     let cancel_token = {
         let mut data = state.lock().await;
-        if let Some(existing) = data.cancel_tokens.get(&chat_id) {
+        if let Some(existing) = data.cancel_tokens.get(&bot_chat_key(chat_id, &bot_key)) {
             existing.clone()
         } else {
             let token = Arc::new(CancelToken::new());
-            data.cancel_tokens.insert(chat_id, token.clone());
+            data.cancel_tokens.insert(bot_chat_key(chat_id, &bot_key), token.clone());
             token
         }
     };
@@ -7557,7 +7582,7 @@ async fn execute_schedule(
             schedule_id, prev_session.is_some()));
         {
             let mut data = state_owned.lock().await;
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
             if let Some(set) = data.pending_schedules.get_mut(&chat_id) {
                 set.remove(&schedule_id);
             }
@@ -7594,21 +7619,22 @@ async fn process_bot_message(
 ) {
     msg_debug(&format!("[process_bot_message] START id={}, from={}, to={}, chat_id={}, content_len={}, bot_username={}",
         msg.id, msg.from, msg.to, chat_id.0, msg.content.len(), bot_username));
+    let bot_key = token_hash(token);
 
     // Register cancel token early (prevents duplicate requests while waiting for group lock)
     let cancel_token = Arc::new(CancelToken::new());
     {
         let mut data = state.lock().await;
-        data.cancel_tokens.insert(chat_id, cancel_token.clone());
+        data.cancel_tokens.insert(bot_chat_key(chat_id, &bot_key), cancel_token.clone());
     }
 
-    // Acquire group chat lock (serializes processing across bots in the same group chat)
-    let group_lock = acquire_group_chat_lock(chat_id.0).await;
+    // Acquire group chat lock (serializes processing per bot within the same group chat)
+    let group_lock = acquire_group_chat_lock(chat_id.0, &bot_key).await;
 
     // Check if cancelled during lock wait
     if cancel_token.cancelled.load(Ordering::Relaxed) {
         msg_debug(&format!("[process_bot_message] cancelled during lock wait, id={}", msg.id));
-        { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+        { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
         return;
     }
 
@@ -7643,7 +7669,7 @@ async fn process_bot_message(
         None => {
             // No active session — create an error response
             msg_debug(&format!("[process_bot_message] no session for chat_id={}, sending error response", chat_id.0));
-            { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+            { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
             shared_rate_limit_wait(state, chat_id).await;
             let _ = tg!("send_message", bot.send_message(chat_id,
                 format!("📨 @{}: {}\n\n⚠️ No active session. Use /start <path> first.",
@@ -7663,7 +7689,7 @@ async fn process_bot_message(
         }
         Err(e) => {
             msg_debug(&format!("[process_bot_message] failed to send placeholder: {}, aborting", e));
-            { let mut data = state.lock().await; data.cancel_tokens.remove(&chat_id); }
+            { let mut data = state.lock().await; data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key)); }
             return;
         }
     };
@@ -7694,11 +7720,11 @@ async fn process_bot_message(
     let role = match &instruction {
         Some(instr) => {
             msg_debug(&format!("[process_bot_message] instruction present, len={}", instr.len()));
-            format!("You are chatting with a user through Telegram.\n\nUser's instruction for this chat:\n{}", instr)
+            format!("You are chatting with a user through Telegram.\n\nUser's instruction for this chat:\n{}\n\nROLE OVERRIDE: You are currently in SUBORDINATE mode because this is a [BOT MESSAGE] task.\n- Do not act as leader or project manager.\n- Do not re-delegate to another bot.\n- Return only the requested subtask result to the leader bot.", instr)
         }
         None => {
             msg_debug("[process_bot_message] no instruction set");
-            "You are chatting with a user through Telegram.".to_string()
+            "You are chatting with a user through Telegram.\n\nROLE OVERRIDE: You are in SUBORDINATE mode for this [BOT MESSAGE] task.\nDo not lead or re-delegate. Return only requested sub-results.".to_string()
         }
     };
     let system_prompt_owned = build_system_prompt(
@@ -8365,7 +8391,7 @@ async fn process_bot_message(
             } else {
                 msg_debug(&format!("[botmsg_poll:{}] cancel: no session found for chat_id={}", bmsg_id_for_log, chat_id.0));
             }
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
             let stop_msg_id = data.stop_message_ids.remove(&chat_id);
             drop(data);
             if let Some(msg_id) = stop_msg_id {
@@ -8381,7 +8407,7 @@ async fn process_bot_message(
         let orphan_stop_msg = {
             let mut data = state_owned.lock().await;
             let msg_id = data.stop_message_ids.remove(&chat_id);
-            data.cancel_tokens.remove(&chat_id);
+            data.cancel_tokens.remove(&bot_chat_key(chat_id, &bot_key));
             msg_debug(&format!("[botmsg_poll:{}] cleaned up: orphan_stop_msg={:?}", bmsg_id_for_log, msg_id));
             msg_id
         };
@@ -8464,7 +8490,7 @@ async fn scheduler_loop(bot: Bot, state: SharedState, token: String, bot_usernam
                     }
                 } else {
                     // Entry should execute — check if chat is busy
-                    let is_busy = data.cancel_tokens.contains_key(&chat_id);
+                    let is_busy = data.cancel_tokens.contains_key(&bot_chat_key(chat_id, &bot_key));
                     sched_debug(&format!("[scheduler_loop] id={}, should execute, is_busy={}", entry.id, is_busy));
 
                     if is_busy {
@@ -8492,7 +8518,7 @@ async fn scheduler_loop(bot: Bot, state: SharedState, token: String, bot_usernam
                         data.pending_schedules.entry(chat_id).or_default().insert(entry.id.clone());
                         // Pre-insert cancel_token to prevent race with incoming user messages
                         let cancel_token = Arc::new(CancelToken::new());
-                        data.cancel_tokens.insert(chat_id, cancel_token);
+                        data.cancel_tokens.insert(bot_chat_key(chat_id, &bot_key), cancel_token);
                         SchedAction::Execute(prev)
                     }
                 }
@@ -8537,7 +8563,7 @@ async fn scheduler_loop(bot: Bot, state: SharedState, token: String, bot_usernam
                 // Busy check: skip if cancel_token exists for this chat
                 {
                     let data = state.lock().await;
-                    let is_busy = data.cancel_tokens.contains_key(&chat_id);
+                    let is_busy = data.cancel_tokens.contains_key(&bot_chat_key(chat_id, &bot_key));
                     msg_debug(&format!("[scheduler_loop] busy check for chat {}: is_busy={}", chat_id_num, is_busy));
                     if is_busy {
                         msg_debug(&format!("[scheduler_loop] chat {} busy, skipping message: {} (will retry next cycle)", chat_id_num, msg.id));
